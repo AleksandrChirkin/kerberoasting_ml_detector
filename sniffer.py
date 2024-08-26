@@ -5,15 +5,16 @@ from scapy.sendrecv import sniff
 
 
 def process_pack(pack: Packet):
-    krb_layer = pack.getlayer(Kerberos)
+    krb_layer = pack[Kerberos]
     # TODO что-то делать с kerberos-данными при помощи ML
-    return pack.summary()
+    # пока просто выводим тип kerberos-сообщения
+    return krb_layer.summary()
 
 
 if __name__ == '__main__':
-    parser = ArgumentParser(description='Kerberoasting detector')
-    parser.add_argument('iface', help='An interface to sniff')
+    parser = ArgumentParser(description='Детектор атаки Kerberoasting')
+    parser.add_argument('--iface', required=False, help='Отслеживаемый интерфейс')
     args = parser.parse_args()
-    sniff(lfilter=lambda pack: pack.getlayer(Kerberos) is not None,
+    sniff(lfilter=lambda pack: pack.haslayer(Kerberos),
           prn=lambda pack: process_pack(pack),
           iface=args.iface)
