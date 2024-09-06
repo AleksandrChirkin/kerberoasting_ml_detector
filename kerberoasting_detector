@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 from scapy.layers.kerberos import KRB_TGS_REQ, EncryptedData, KRB_Ticket, KRB_AP_REQ, PADATA
 from scapy.packet import Packet
 from scapy.sendrecv import sniff
+from syslog import LOG_WARNING, syslog
 
 rc4_hmac_signature = '0x17'
 
@@ -16,7 +17,7 @@ def process_pack(pack: Packet):
     padata_etype = repr(pack[PADATA][EncryptedData].etype)
     if (rc4_hmac_signature in krb_ticket_etype or rc4_hmac_signature in krb_ap_req_etype or
             rc4_hmac_signature in padata_etype):
-        print('WARNING: RC4-ENCRYPTED PACKET FOUND!')
+        syslog(LOG_WARNING, 'RC4-ENCRYPTED PACKET FOUND!')
     # TODO обнаруживать аномальное количество TGS_REQ при помощи ML
 
 
