@@ -1,23 +1,33 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser
-from scapy.layers.kerberos import KRB_TGS_REQ, EncryptedData, KRB_Ticket, KRB_AP_REQ, PADATA
+
+from scapy.layers.inet import IP
+from scapy.layers.kerberos import KRB_TGS_REQ, EncryptedData, KRB_Ticket, KRB_AP_REQ, PADATA, KRB_KDC_REQ_BODY
 from scapy.packet import Packet
 from scapy.sendrecv import sniff
-from syslog import LOG_WARNING, syslog
+from syslog import LOG_WARNING, syslog, LOG_INFO
 
-rc4_hmac_signature = '0x17'
+rc4_hmac_signature = 23
 
 def process_pack(pack: Packet):
-    # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17)
+    cname = pack[KRB_KDC_REQ_BODY].cname
+    cname_str = None if cname is None else "/".join(['' if part is None else part.val.decode() for part in cname.nameString])
+    sname_str = "/".join(['' if part is None else part.val.decode() for part in pack[KRB_KDC_REQ_BODY].sname.nameString])
+    syslog(LOG_INFO, f'Получен TGS_REQ. Отправитель: {pack[IP].src} '
+                     f'(сервис {cname_str}). '
+                     f'Запрашиваемый сервис: {sname_str}. '
+                     f'Realm: {pack[KRB_KDC_REQ_BODY].realm.val.decode()}')
+    tgs_req = pack[KRB_TGS_REQ]
+    # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
-    krb_ticket_etype = repr(pack[KRB_Ticket][EncryptedData].etype)
+    krb_ticket_etype = tgs_req[KRB_Ticket][EncryptedData].etype.val
     # находим алгоритм шифрования во вложенном AP_REQ
-    krb_ap_req_etype = repr(pack[KRB_AP_REQ][EncryptedData].etype)
+    krb_ap_req_etype = tgs_req[KRB_AP_REQ][EncryptedData].etype.val
     # находим алгоритм шифрования в PADATA
-    padata_etype = repr(pack[PADATA][EncryptedData].etype)
-    if (rc4_hmac_signature in krb_ticket_etype or rc4_hmac_signature in krb_ap_req_etype or
-            rc4_hmac_signature in padata_etype):
-        syslog(LOG_WARNING, 'RC4-ENCRYPTED PACKET FOUND!')
+    padata_etype = tgs_req[PADATA][EncryptedData].etype.val
+    if (krb_ticket_etype == rc4_hmac_signature or krb_ap_req_etype == rc4_hmac_signature or
+            padata_etype == rc4_hmac_signature):
+        syslog(LOG_WARNING, 'Обнаружен пакет, зашифрованный алгоритмом RC4.')
     # TODO обнаруживать аномальное количество TGS_REQ при помощи ML
 
 
@@ -25,6 +35,9 @@ if __name__ == '__main__':
     parser = ArgumentParser(description='Детектор атаки Kerberoasting')
     parser.add_argument('--iface', required=False, help='Отслеживаемый интерфейс')
     args = parser.parse_args()
+    iface = args.iface
+    syslog(LOG_INFO, f'Детектор атаки Kerberoasting запущен.')
+    syslog(LOG_INFO, f'Запущено прослушивание интерфейса {iface}.')
     sniff(lfilter=lambda pack: pack.haslayer(KRB_TGS_REQ),
           prn=lambda pack: process_pack(pack),
-          iface=args.iface)
+          iface=iface)
