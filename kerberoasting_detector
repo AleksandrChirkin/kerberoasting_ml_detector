@@ -14,7 +14,7 @@ def process_pack(pack: Packet):
     if pack.haslayer(KRB_TGS_REQ):
         req = pack[KRB_TGS_REQ]
     elif pack.haslayer(KRB_AS_REQ):
-        req = pack[KRB_AP_REQ]
+        req = pack[KRB_AS_REQ]
     else:
         syslog(LOG_WARNING, 'Обнаружен неопознанный пакет, содержащий KRB-KDC-REQ-BODY. Пропускаем')
         return
@@ -23,16 +23,19 @@ def process_pack(pack: Packet):
     cname_str = None if cname is None else '/'.join(['' if part is None else part.val.decode() for part in cname.nameString])
     sname_str = '/'.join(['' if part is None else part.val.decode() for part in krb_kdc_req_body.sname.nameString])
     syslog(LOG_INFO, f'Получен {req.summary()}. Отправитель: {pack[IP].src} '
-                     f'(сервис {cname_str}). '
+                     f'(клиент {cname_str}). '
                      f'Запрашиваемый сервис: {sname_str}. '
                      f'Realm: {krb_kdc_req_body.realm.val.decode()}')
     # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
-    krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val
+    krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val \
+        if req.haslayer(KRB_Ticket) and req[KRB_Ticket].haslayer(EncryptedData) else None
     # находим алгоритм шифрования во вложенном AP_REQ
-    krb_ap_req_etype = req[KRB_AP_REQ][EncryptedData].etype.val
+    krb_ap_req_etype = req[KRB_AP_REQ][EncryptedData].etype.val \
+        if req.haslayer(KRB_AP_REQ) and req[KRB_AP_REQ].haslayer(EncryptedData) else None
     # находим алгоритм шифрования в PADATA
-    padata_etype = req[PADATA][EncryptedData].etype.val
+    padata_etype = req[PADATA][EncryptedData].etype.val \
+        if req.haslayer(PADATA) and req[PADATA].haslayer(EncryptedData) else None
     if (krb_ticket_etype == rc4_hmac_signature or krb_ap_req_etype == rc4_hmac_signature or
             padata_etype == rc4_hmac_signature):
         syslog(LOG_WARNING, 'Обнаружен пакет, зашифрованный алгоритмом RC4.')
