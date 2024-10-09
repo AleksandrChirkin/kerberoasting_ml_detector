@@ -2,7 +2,8 @@
 from argparse import ArgumentParser
 
 from scapy.layers.inet import IP
-from scapy.layers.kerberos import KRB_TGS_REQ, EncryptedData, KRB_Ticket, KRB_AP_REQ, PADATA, KRB_KDC_REQ_BODY
+from scapy.layers.kerberos import KRB_TGS_REQ, EncryptedData, KRB_Ticket, KRB_AP_REQ, PADATA, KRB_KDC_REQ_BODY, \
+    KRB_AS_REQ
 from scapy.packet import Packet
 from scapy.sendrecv import sniff
 from syslog import LOG_WARNING, syslog, LOG_INFO
@@ -10,21 +11,28 @@ from syslog import LOG_WARNING, syslog, LOG_INFO
 rc4_hmac_signature = 23
 
 def process_pack(pack: Packet):
-    cname = pack[KRB_KDC_REQ_BODY].cname
-    cname_str = None if cname is None else "/".join(['' if part is None else part.val.decode() for part in cname.nameString])
-    sname_str = "/".join(['' if part is None else part.val.decode() for part in pack[KRB_KDC_REQ_BODY].sname.nameString])
-    syslog(LOG_INFO, f'Получен TGS_REQ. Отправитель: {pack[IP].src} '
+    if pack.haslayer(KRB_TGS_REQ):
+        req = pack[KRB_TGS_REQ]
+    elif pack.haslayer(KRB_AS_REQ):
+        req = pack[KRB_AP_REQ]
+    else:
+        syslog(LOG_WARNING, 'Обнаружен неопознанный пакет, содержащий KRB-KDC-REQ-BODY. Пропускаем')
+        return
+    krb_kdc_req_body = pack[KRB_KDC_REQ_BODY]
+    cname = krb_kdc_req_body.cname
+    cname_str = None if cname is None else '/'.join(['' if part is None else part.val.decode() for part in cname.nameString])
+    sname_str = '/'.join(['' if part is None else part.val.decode() for part in krb_kdc_req_body.sname.nameString])
+    syslog(LOG_INFO, f'Получен {req.summary()}. Отправитель: {pack[IP].src} '
                      f'(сервис {cname_str}). '
                      f'Запрашиваемый сервис: {sname_str}. '
-                     f'Realm: {pack[KRB_KDC_REQ_BODY].realm.val.decode()}')
-    tgs_req = pack[KRB_TGS_REQ]
+                     f'Realm: {krb_kdc_req_body.realm.val.decode()}')
     # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
-    krb_ticket_etype = tgs_req[KRB_Ticket][EncryptedData].etype.val
+    krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val
     # находим алгоритм шифрования во вложенном AP_REQ
-    krb_ap_req_etype = tgs_req[KRB_AP_REQ][EncryptedData].etype.val
+    krb_ap_req_etype = req[KRB_AP_REQ][EncryptedData].etype.val
     # находим алгоритм шифрования в PADATA
-    padata_etype = tgs_req[PADATA][EncryptedData].etype.val
+    padata_etype = req[PADATA][EncryptedData].etype.val
     if (krb_ticket_etype == rc4_hmac_signature or krb_ap_req_etype == rc4_hmac_signature or
             padata_etype == rc4_hmac_signature):
         syslog(LOG_WARNING, 'Обнаружен пакет, зашифрованный алгоритмом RC4.')
@@ -38,6 +46,6 @@ if __name__ == '__main__':
     iface = args.iface
     syslog(LOG_INFO, f'Детектор атаки Kerberoasting запущен.')
     syslog(LOG_INFO, f'Запущено прослушивание интерфейса {iface}.')
-    sniff(lfilter=lambda pack: pack.haslayer(KRB_TGS_REQ),
+    sniff(lfilter=lambda pack: pack.haslayer(KRB_KDC_REQ_BODY),
           prn=lambda pack: process_pack(pack),
           iface=iface)
