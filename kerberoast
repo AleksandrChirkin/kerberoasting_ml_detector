@@ -1,13 +1,28 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser
 from random import Random
+from sched import scheduler
 from subprocess import DEVNULL, run
 from threading import Thread
+from time import sleep, time
 
-global domain
 
-def running_ssh(sname: str):
+random = Random()
+spns: list[str]
+
+
+def running_ssh(sname: str, domain: str):
     run(['kvno', f'{sname}/{domain}'], stdout=DEVNULL, stderr=DEVNULL)
+
+
+def simulate_kerberoast():
+    for _ in range(args.number_of_tgs):
+        thread = Thread(target=running_ssh, args=(spns[random.randint(0, len(spns) - 1)], domain,))
+        thread.start()
+    kerberoast_scheduler = scheduler(time, sleep)
+    kerberoast_scheduler.enter(random.randint(1, 86400), 1, simulate_kerberoast)
+    kerberoast_scheduler.run()
+
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='Симулятор атаки Kerberoast.')
@@ -17,7 +32,6 @@ if __name__ == '__main__':
     domain = args.domain
     with open('spn_list.txt') as spn_list:
         spns = [line.strip() for line in spn_list.readlines()]
-    random = Random()
-    for _ in range(args.number_of_tgs):
-        thread = Thread(target=running_ssh, args=(spns[random.randint(0, len(spns) - 1)],))
-        thread.start()
+    kerberoast_scheduler = scheduler(time, sleep)
+    kerberoast_scheduler.enter(random.randint(1, 86400), 1, simulate_kerberoast)
+    kerberoast_scheduler.run()
