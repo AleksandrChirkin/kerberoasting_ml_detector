@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+from argparse import ArgumentParser
+from random import Random
+from subprocess import DEVNULL, run
+from threading import Thread
+
+global domain
+
+def running_ssh(sname: str):
+    run(['kvno', f'{sname}/{domain}'], stdout=DEVNULL, stderr=DEVNULL)
+
+if __name__ == '__main__':
+    parser = ArgumentParser(description='Симулятор атаки Kerberoast.')
+    parser.add_argument('--user', type=str, help='Логин')
+    parser.add_argument('--domain', type=str, help='Домен для "взлома"')
+    parser.add_argument('--number_of_tgs', type=int, default=1000, help='Количество TGS-REQ')
+    args = parser.parse_args()
+    domain = args.domain
+    run(['kdestroy'])
+    user = args.user
+    run(['kinit', f'{user}@{domain}'])
+    with open('spn_list.txt') as spn_list:
+        spns = [line.strip() for line in spn_list.readlines()]
+    random = Random()
+    for _ in range(args.number_of_tgs):
+        thread = Thread(target=running_ssh, args=(spns[random.randint(0, len(spns) - 1)],))
+        thread.start()
