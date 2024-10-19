@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser
+from collections import OrderedDict
 from csv import DictReader, writer
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timedelta
@@ -28,12 +29,16 @@ class Record:
     sname: str
     realm: str
 
+@dataclass
+class FrequenciesItem:
+    number: int
+    source_sname_pairs: set[tuple[str, str]]
+
 rc4_hmac_signature = 23
 random = Random()
-# TODO подумать, как заменить случайное ограничение на LOF
-lof_max = -1 - random.uniform(0, 1)
+lof_min = -1.1
 records: list[Record]
-frequencies: dict[datetime, tuple[int, set[tuple[str, str]]]]
+frequencies: OrderedDict[datetime, FrequenciesItem]
 running = True
 
 
@@ -73,16 +78,17 @@ def load_datasets():
     for dataset in datasets:
         with open(dataset) as dataset_file:
             csv_reader = DictReader(dataset_file)
-        for row in csv_reader:
-            loaded_records.append(Record(**row))
+            for row in csv_reader:
+                loaded_records.append(Record(**row))
     freqs = {}
     for record in loaded_records:
-        time_without_seconds = record.time.replace(microsecond=0)
+        # необходимо преобразовать в datetime, т.к. csv_reader прочитает datetime как строку
+        time_without_seconds = datetime.strptime(record.time, '%Y-%m-%d %H:%M:%S.%f').replace(microsecond=0)
         if time_without_seconds in freqs.keys():
-            freqs[time_without_seconds][0] += 1
-            freqs[time_without_seconds][1].add((record.source, record.sname))
+            freqs[time_without_seconds].number += 1
+            freqs[time_without_seconds].source_sname_pairs.add((record.source, record.sname))
         else:
-            freqs[time_without_seconds] = (1, {(record.source, record.sname)})
+            freqs[time_without_seconds] = FrequenciesItem(1, {(record.source, record.sname)})
     if len(datasets) > 0:
         syslog(LOG_INFO, f'Загружено {len(loaded_records)} записей из {len(datasets)} дампов запросов')
     return freqs
@@ -91,14 +97,14 @@ def load_datasets():
 def find_anomaly():
     # если в течение последней секунды не зафиксировано никакой активности, то и искать аномалии бессмысленно
     time = datetime.now()
-    if (time.replace(microsecond=0) - timedelta(seconds=1)) not in frequencies.values():
+    if (time.replace(microsecond=0) - timedelta(seconds=1)) not in frequencies.keys():
         return
-    frequencies_vectors = [(item[0], len(item[1])) for item in frequencies.values()]
+    frequencies_vectors = [(item.number, len(item.source_sname_pairs)) for item in frequencies.values()]
     lof = LocalOutlierFactor(n_neighbors=20, contamination=0.1)
     lof.fit_predict(frequencies_vectors)
     lof_values = lof.negative_outlier_factor_
     last_measurement = lof_values[-1]
-    if last_measurement < lof_max:
+    if last_measurement < lof_min:
         syslog(LOG_WARNING, 'Обнаружено аномально большое количество пакетов')
 
 
@@ -124,10 +130,10 @@ def process_pack(pack: Packet):
     records.append(Record(time, req.summary(), source, cname_str, sname_str, realm))
     time_without_seconds = time.replace(microsecond=0)
     if time_without_seconds in frequencies.keys():
-        frequencies[time_without_seconds][0] += 1
-        frequencies[time_without_seconds][1].add((source, sname_str))
+        frequencies[time_without_seconds].number += 1
+        frequencies[time_without_seconds].source_sname_pairs.add((source, sname_str))
     else:
-        frequencies[time_without_seconds] = (1, {(source, sname_str)})
+        frequencies[time_without_seconds] = FrequenciesItem(1, {(source, sname_str)})
     # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
     krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val \
