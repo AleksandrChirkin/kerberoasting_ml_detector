@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser
-from csv import writer
+from csv import DictReader, writer
 from dataclasses import asdict, dataclass, fields
-from datetime import datetime
+from datetime import datetime, timedelta
+from os import listdir
+from os.path import isfile
+from random import Random
 from scapy.layers.inet import IP
 from scapy.layers.kerberos import KRB_TGS_REQ, EncryptedData, KRB_Ticket, KRB_AP_REQ, PADATA, KRB_KDC_REQ_BODY, \
     KRB_AS_REQ
@@ -10,6 +13,7 @@ from scapy.packet import Packet
 from scapy.sendrecv import sniff
 from schedule import every, run_pending
 from signal import signal, SIGTERM
+from sklearn.neighbors import LocalOutlierFactor
 from syslog import LOG_WARNING, syslog, LOG_INFO
 from threading import Thread
 from time import sleep
@@ -25,7 +29,11 @@ class Record:
     realm: str
 
 rc4_hmac_signature = 23
+random = Random()
+# TODO подумать, как заменить случайное ограничение на LOF
+lof_max = -1 - random.uniform(0, 1)
 records: list[Record]
+frequencies: dict[datetime, tuple[int, set[tuple[str, str]]]]
 running = True
 
 
@@ -47,16 +55,51 @@ def dump_dataset():
     global records
     if len(records) > 0:
         with open(f'datasets/{timestamp}dataset.csv', 'w') as dataset_file:
-            write = writer(dataset_file)
-            write.writerow([f.name for f in fields(Record)])
+            csv_writer = writer(dataset_file)
+            csv_writer.writerow([f.name for f in fields(Record)])
             record_fields = [[value for name, value in asdict(record).items()] for record in records]
-            write.writerows(record_fields)
+            csv_writer.writerows(record_fields)
         request_number = len(records)
         records = []
         syslog(LOG_INFO, f'Сделан дамп запросов в файл {timestamp}dataset.csv '
-                         f'(количество запрсов: {request_number})')
+                         f'(количество запросов: {request_number})')
     else:
         syslog(LOG_INFO, f'Дамп запросов не сделан, т.к. не было запросов')
+
+
+def load_datasets():
+    loaded_records = []
+    datasets = [f'datasets/{file}' for file in listdir('datasets') if isfile(f'datasets/{file}')]
+    for dataset in datasets:
+        with open(dataset) as dataset_file:
+            csv_reader = DictReader(dataset_file)
+        for row in csv_reader:
+            loaded_records.append(Record(**row))
+    freqs = {}
+    for record in loaded_records:
+        time_without_seconds = record.time.replace(microsecond=0)
+        if time_without_seconds in freqs.keys():
+            freqs[time_without_seconds][0] += 1
+            freqs[time_without_seconds][1].add((record.source, record.sname))
+        else:
+            freqs[time_without_seconds] = (1, {(record.source, record.sname)})
+    if len(datasets) > 0:
+        syslog(LOG_INFO, f'Загружено {len(loaded_records)} записей из {len(datasets)} дампов запросов')
+    return freqs
+
+
+def find_anomaly():
+    # если в течение последней секунды не зафиксировано никакой активности, то и искать аномалии бессмысленно
+    time = datetime.now()
+    if (time.replace(microsecond=0) - timedelta(seconds=1)) not in frequencies.values():
+        return
+    frequencies_vectors = [(item[0], len(item[1])) for item in frequencies.values()]
+    lof = LocalOutlierFactor(n_neighbors=20, contamination=0.1)
+    lof.fit_predict(frequencies_vectors)
+    lof_values = lof.negative_outlier_factor_
+    last_measurement = lof_values[-1]
+    if last_measurement < lof_max:
+        syslog(LOG_WARNING, 'Обнаружено аномально большое количество пакетов')
 
 
 def process_pack(pack: Packet):
@@ -66,7 +109,7 @@ def process_pack(pack: Packet):
     elif pack.haslayer(KRB_AS_REQ):
         req = pack[KRB_AS_REQ]
     else:
-        syslog(LOG_WARNING, 'Обнаружен неопознанный пакет, содержащий KRB-KDC-REQ-BODY. Пропускаем')
+        syslog(LOG_INFO, 'Обнаружен неопознанный пакет, содержащий KRB-KDC-REQ-BODY. Пропускаем')
         return
     krb_kdc_req_body = pack[KRB_KDC_REQ_BODY]
     cname = krb_kdc_req_body.cname
@@ -79,6 +122,12 @@ def process_pack(pack: Packet):
                      f'Запрашиваемый сервис: {sname_str}. '
                      f'Realm: {krb_kdc_req_body.realm.val.decode()}')
     records.append(Record(time, req.summary(), source, cname_str, sname_str, realm))
+    time_without_seconds = time.replace(microsecond=0)
+    if time_without_seconds in frequencies.keys():
+        frequencies[time_without_seconds][0] += 1
+        frequencies[time_without_seconds][1].add((source, sname_str))
+    else:
+        frequencies[time_without_seconds] = (1, {(source, sname_str)})
     # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
     krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val \
@@ -92,7 +141,6 @@ def process_pack(pack: Packet):
     if (krb_ticket_etype == rc4_hmac_signature or krb_ap_req_etype == rc4_hmac_signature or
             padata_etype == rc4_hmac_signature):
         syslog(LOG_WARNING, 'Обнаружен пакет, зашифрованный алгоритмом RC4.')
-    # TODO обнаруживать аномальное количество TGS_REQ при помощи ML
 
 
 if __name__ == '__main__':
@@ -101,7 +149,9 @@ if __name__ == '__main__':
     parser.add_argument('--iface', required=False, help='Отслеживаемый интерфейс')
     args = parser.parse_args()
     records = []
+    frequencies = load_datasets()
     every().day.at('00:00').do(dump_dataset)
+    every().second.do(find_anomaly)
     scheduler = Thread(target=run_schedule)
     scheduler.start()
     iface = args.iface
