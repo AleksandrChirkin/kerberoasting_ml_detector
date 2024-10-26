@@ -36,6 +36,7 @@ class Record:
 class FrequenciesItem:
     number: int
     source_sname_pairs: set[tuple[str, str]]
+    attack_marks: int
 
 
 class LearningMechanism(Enum):
@@ -96,18 +97,21 @@ def load_datasets():
                 record = Record(**row)
                 # необходимо преобразовать в datetime, т.к. csv_reader прочитает datetime как строку
                 record.time = datetime.strptime(record.time, '%Y-%m-%d %H:%M:%S.%f')
+                record.mark = 0 if record.mark == '' else int(record.mark)
                 loaded_records.append(record)
-    freqs = {}
+    freqs = OrderedDict()
     for record in loaded_records:
         time_without_seconds = record.time.replace(microsecond=0)
         if time_without_seconds in freqs.keys():
             freqs[time_without_seconds].number += 1
             freqs[time_without_seconds].source_sname_pairs.add((record.source, record.sname))
+            freqs[time_without_seconds].attack_marks += record.mark
         else:
-            freqs[time_without_seconds] = FrequenciesItem(1, {(record.source, record.sname)})
+            freqs[time_without_seconds] = FrequenciesItem(1, {(record.source, record.sname)}, record.mark)
     if mech == LearningMechanism.SVM:
+        global svm
         svm = OneClassSVM()
-        frequencies_vectors = [(item.number, len(item.source_sname_pairs)) for item in frequencies.values()]
+        frequencies_vectors = [(item.number, len(item.source_sname_pairs), item.attack_marks) for item in freqs.values()]
         svm.fit_predict(frequencies_vectors)
     if len(datasets) > 0:
         syslog(LOG_INFO, f'Загружено {len(loaded_records)} записей из {len(datasets)} дампов запросов')
@@ -119,7 +123,7 @@ def find_anomaly():
     time = datetime.now()
     if (time.replace(microsecond=0) - timedelta(seconds=1)) not in frequencies.keys():
         return
-    frequencies_vectors = [(item.number, len(item.source_sname_pairs)) for item in frequencies.values()]
+    frequencies_vectors = [(item.number, len(item.source_sname_pairs), item.attack_marks) for item in frequencies.values()]
     if mech == LearningMechanism.LOF:
         lof = LocalOutlierFactor(n_neighbors=20, contamination=0.1)
         lof.fit_predict(frequencies_vectors)
@@ -158,7 +162,7 @@ def process_pack(pack: Packet):
         frequencies[time_without_seconds].number += 1
         frequencies[time_without_seconds].source_sname_pairs.add((source, sname_str))
     else:
-        frequencies[time_without_seconds] = FrequenciesItem(1, {(source, sname_str)})
+        frequencies[time_without_seconds] = FrequenciesItem(1, {(source, sname_str)}, 0)
     # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
     krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val \
