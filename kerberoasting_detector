@@ -19,7 +19,7 @@ from sklearn.neighbors import LocalOutlierFactor
 from sklearn.svm import OneClassSVM
 from syslog import LOG_WARNING, syslog, LOG_INFO
 from threading import Thread
-from time import sleep
+from time import perf_counter, sleep
 
 
 @dataclass
@@ -126,15 +126,19 @@ def find_anomaly():
     frequencies_vectors = [(item.number, len(item.source_sname_pairs), item.attack_marks) for item in frequencies.values()]
     if mech == LearningMechanism.LOF:
         lof = LocalOutlierFactor(n_neighbors=20, contamination=0.1)
+        time_start = perf_counter()
         lof.fit_predict(frequencies_vectors)
         lof_values = lof.negative_outlier_factor_
+        time_stop = perf_counter()
         last_measurement = lof_values[-1]
         if last_measurement < lof_min:
-            syslog(LOG_WARNING, 'Обнаружено аномально большое количество пакетов')
+            syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. Время анализа: {time_stop - time_start}')
     elif mech == LearningMechanism.SVM:
+        time_start = perf_counter()
         last_measurement = svm.decision_function([frequencies_vectors[-1]])
+        time_stop = perf_counter()
         if last_measurement < 0:
-            syslog(LOG_WARNING, 'Обнаружено аномально большое количество пакетов')
+            syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. Время анализа: {time_stop - time_start}')
 
 
 def process_pack(pack: Packet):
