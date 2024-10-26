@@ -186,7 +186,7 @@ if __name__ == '__main__':
     signal(SIGTERM, handle_sigterm)
     parser = ArgumentParser(description='Детектор атаки Kerberoasting')
     parser.add_argument('--iface', required=False, help='Отслеживаемый интерфейс')
-    parser.add_argument('--mech', type=lambda mech: LearningMechanism[mech], default=LearningMechanism.LOF,
+    parser.add_argument('--mech', type=lambda mech: LearningMechanism[mech], default=LearningMechanism.SVM,
                         choices=list(LearningMechanism), help='Механизм обнаружения')
     args = parser.parse_args()
     records = []
