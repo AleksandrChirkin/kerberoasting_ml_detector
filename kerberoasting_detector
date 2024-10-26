@@ -4,6 +4,7 @@ from collections import OrderedDict
 from csv import DictReader, writer
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timedelta
+from enum import Enum
 from os import listdir
 from os.path import isfile
 from random import Random
@@ -15,6 +16,7 @@ from scapy.sendrecv import sniff
 from schedule import every, run_pending
 from signal import signal, SIGTERM
 from sklearn.neighbors import LocalOutlierFactor
+from sklearn.svm import OneClassSVM
 from syslog import LOG_WARNING, syslog, LOG_INFO
 from threading import Thread
 from time import sleep
@@ -28,11 +30,21 @@ class Record:
     cname: str | None
     sname: str
     realm: str
+    mark: int | None
 
 @dataclass
 class FrequenciesItem:
     number: int
     source_sname_pairs: set[tuple[str, str]]
+
+
+class LearningMechanism(Enum):
+    LOF = 1
+    SVM = 2
+
+    def __str__(self):
+        return self.name
+
 
 rc4_hmac_signature = 23
 random = Random()
@@ -40,6 +52,8 @@ lof_min = -1.1
 records: list[Record]
 frequencies: OrderedDict[datetime, FrequenciesItem]
 running = True
+mech: LearningMechanism
+svm: OneClassSVM
 
 
 def handle_sigterm(signum, frame):
@@ -79,16 +93,22 @@ def load_datasets():
         with open(dataset) as dataset_file:
             csv_reader = DictReader(dataset_file)
             for row in csv_reader:
-                loaded_records.append(Record(**row))
+                record = Record(**row)
+                # необходимо преобразовать в datetime, т.к. csv_reader прочитает datetime как строку
+                record.time = datetime.strptime(record.time, '%Y-%m-%d %H:%M:%S.%f')
+                loaded_records.append(record)
     freqs = {}
     for record in loaded_records:
-        # необходимо преобразовать в datetime, т.к. csv_reader прочитает datetime как строку
-        time_without_seconds = datetime.strptime(record.time, '%Y-%m-%d %H:%M:%S.%f').replace(microsecond=0)
+        time_without_seconds = record.time.replace(microsecond=0)
         if time_without_seconds in freqs.keys():
             freqs[time_without_seconds].number += 1
             freqs[time_without_seconds].source_sname_pairs.add((record.source, record.sname))
         else:
             freqs[time_without_seconds] = FrequenciesItem(1, {(record.source, record.sname)})
+    if mech == LearningMechanism.SVM:
+        svm = OneClassSVM()
+        frequencies_vectors = [(item.number, len(item.source_sname_pairs)) for item in frequencies.values()]
+        svm.fit_predict(frequencies_vectors)
     if len(datasets) > 0:
         syslog(LOG_INFO, f'Загружено {len(loaded_records)} записей из {len(datasets)} дампов запросов')
     return freqs
@@ -100,12 +120,17 @@ def find_anomaly():
     if (time.replace(microsecond=0) - timedelta(seconds=1)) not in frequencies.keys():
         return
     frequencies_vectors = [(item.number, len(item.source_sname_pairs)) for item in frequencies.values()]
-    lof = LocalOutlierFactor(n_neighbors=20, contamination=0.1)
-    lof.fit_predict(frequencies_vectors)
-    lof_values = lof.negative_outlier_factor_
-    last_measurement = lof_values[-1]
-    if last_measurement < lof_min:
-        syslog(LOG_WARNING, 'Обнаружено аномально большое количество пакетов')
+    if mech == LearningMechanism.LOF:
+        lof = LocalOutlierFactor(n_neighbors=20, contamination=0.1)
+        lof.fit_predict(frequencies_vectors)
+        lof_values = lof.negative_outlier_factor_
+        last_measurement = lof_values[-1]
+        if last_measurement < lof_min:
+            syslog(LOG_WARNING, 'Обнаружено аномально большое количество пакетов')
+    elif mech == LearningMechanism.SVM:
+        last_measurement = svm.decision_function([frequencies_vectors[-1]])
+        if last_measurement < 0:
+            syslog(LOG_WARNING, 'Обнаружено аномально большое количество пакетов')
 
 
 def process_pack(pack: Packet):
@@ -127,7 +152,7 @@ def process_pack(pack: Packet):
                      f'(клиент {cname_str}). '
                      f'Запрашиваемый сервис: {sname_str}. '
                      f'Realm: {krb_kdc_req_body.realm.val.decode()}')
-    records.append(Record(time, req.summary(), source, cname_str, sname_str, realm))
+    records.append(Record(time, req.summary(), source, cname_str, sname_str, realm, None))
     time_without_seconds = time.replace(microsecond=0)
     if time_without_seconds in frequencies.keys():
         frequencies[time_without_seconds].number += 1
@@ -153,8 +178,11 @@ if __name__ == '__main__':
     signal(SIGTERM, handle_sigterm)
     parser = ArgumentParser(description='Детектор атаки Kerberoasting')
     parser.add_argument('--iface', required=False, help='Отслеживаемый интерфейс')
+    parser.add_argument('--mech', type=lambda mech: LearningMechanism[mech], default=LearningMechanism.LOF,
+                        choices=list(LearningMechanism), help='Механизм обнаружения')
     args = parser.parse_args()
     records = []
+    mech = args.mech
     frequencies = load_datasets()
     every().day.at('00:00').do(dump_dataset)
     every().second.do(find_anomaly)
