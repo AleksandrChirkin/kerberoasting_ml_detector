@@ -108,13 +108,16 @@ def load_datasets():
             freqs[time_without_seconds].attack_marks += record.mark
         else:
             freqs[time_without_seconds] = FrequenciesItem(1, {(record.source, record.sname)}, record.mark)
+    if len(datasets) > 0:
+        syslog(LOG_INFO, f'Загружено {len(loaded_records)} записей из {len(datasets)} дампов запросов')
     if mech == LearningMechanism.SVM:
         global svm
         svm = OneClassSVM()
         frequencies_vectors = [(item.number, len(item.source_sname_pairs), item.attack_marks) for item in freqs.values()]
+        time_start = perf_counter()
         svm.fit_predict(frequencies_vectors)
-    if len(datasets) > 0:
-        syslog(LOG_INFO, f'Загружено {len(loaded_records)} записей из {len(datasets)} дампов запросов')
+        time_end = perf_counter()
+        syslog(LOG_INFO, f'SVM создана за {time_end - time_start} секунд')
     return freqs
 
 
@@ -132,13 +135,15 @@ def find_anomaly():
         time_stop = perf_counter()
         last_measurement = lof_values[-1]
         if last_measurement < lof_min:
-            syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. Время анализа: {time_stop - time_start}')
+            syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. '
+                                f'Время анализа: {time_stop - time_start} секунд')
     elif mech == LearningMechanism.SVM:
         time_start = perf_counter()
         last_measurement = svm.decision_function([frequencies_vectors[-1]])
         time_stop = perf_counter()
         if last_measurement < 0:
-            syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. Время анализа: {time_stop - time_start}')
+            syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. '
+                                f'Время анализа: {time_stop - time_start} скекунд')
 
 
 def process_pack(pack: Packet):
