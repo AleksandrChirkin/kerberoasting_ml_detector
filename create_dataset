@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+from csv import writer
+from dataclasses import asdict, dataclass, fields
+from datetime import datetime, timedelta
+from random import Random, randint
+from socket import inet_ntoa
+from string import ascii_uppercase, digits
+from struct import pack
+
+
+@dataclass
+class Record:
+    time: datetime
+    type: str
+    source: str
+    cname: str | None
+    sname: str
+    realm: str
+    mark: int | None
+
+
+if __name__ == '__main__':
+    kalt_pop = 1033914
+    samt_pop = 946429+3127842+2385163+1434557+1172782
+    yekt_pop = 4064361+2495266+753002+1828656+4222695+3890800+3395798
+    omst_pop = 1818093
+    krat_pop = 210765+337544+528175+2115308+2846120+2547684+2789532+1043385
+    irkt_pop = 971922+2330537
+    yakt_pop = 1001664+984395+750083
+    vlat_pop = 1806393+1278132+145802
+    magt_pop = 133387+457590
+    pett_pop = 288947+48029
+    msk_pop = 146150789-kalt_pop-samt_pop-yekt_pop-omst_pop-krat_pop-irkt_pop-yakt_pop-vlat_pop-magt_pop-pett_pop
+    employees_by_tz = {
+        -1: int(kalt_pop / 146150789 * 1000),
+        0: int(msk_pop / 146150789 * 1000),
+        1: int(samt_pop / 146150789 * 1000),
+        2: int(yekt_pop / 146150789 * 1000),
+        3: int(omst_pop / 146150789 * 1000),
+        4: int(krat_pop / 146150789 * 1000),
+        5: int(irkt_pop / 146150789 * 1000),
+        6: int(yakt_pop / 146150789 * 1000),
+        7: int(vlat_pop / 146150789 * 1000),
+        8: int(magt_pop / 146150789 * 1000),
+        9: int(pett_pop / 146150789 * 1000),
+    }
+    with open('spn_list.txt') as spn_list:
+        spns = [line.strip() for line in spn_list.readlines()]
+    r = Random()
+    # пусть объект КИИ принадлежит организации, время начала работы которой - 8:00 по местному времени
+    start_time = datetime(year=2024, month=10, day=1, hour=8)
+    records = []
+    for tz in employees_by_tz.items():
+        local_start_time_timestamp = (start_time - timedelta(hours=tz[0])).timestamp()
+        for _ in range(tz[1]):
+            as_req_time = r.normalvariate(local_start_time_timestamp, 900)
+            source = inet_ntoa(pack('>I', randint(0x0a000000, 0x0affffff)))  # 10.0.0.0/8
+            cname = ''.join(r.choice(ascii_uppercase + digits) for _ in range(10)) # случайное имя клиента
+            records.append(Record(datetime.fromtimestamp(as_req_time), 'KRB_AS_REQ', source, cname, 'krbtgt/DIPLOMA.RU',
+                            'DIPLOMA.RU', None))
+            ldap_tgs_req_time = as_req_time + r.uniform(0, 0.1)
+            records.append(Record(datetime.fromtimestamp(ldap_tgs_req_time), 'KRB_TGS_REQ', source, None,
+                                  'ldap/dc.diploma.ru', 'DIPLOMA.RU', None))
+            tgs_requests = r.randint(0, 100)
+            for __ in range(tgs_requests):
+                tgs_req_time = r.uniform(ldap_tgs_req_time, ldap_tgs_req_time + 32400) # время логина + 9 часов
+                sname = spns[r.randint(0, len(spns) - 1)]
+                records.append(Record(datetime.fromtimestamp(tgs_req_time), 'KRB_TGS_REQ', source, None,
+                                      f'{sname}/DIPLOMA.RU', 'DIPLOMA.RU', None))
+    attack_start_time = r.uniform(start_time.replace(hour=0).timestamp(),
+                                  (start_time.replace(hour=0) + timedelta(days=1)).timestamp())
+    attack_duration = r.randint(0, 60)
+    compromized_ip = inet_ntoa(pack('>I', randint(0x0a000000, 0x0affffff)))  # 10.0.0.0/8
+    for _ in range(r.randint(100, 1000)):
+        sname = spns[r.randint(0, len(spns) - 1)]
+        tgs_req_time = datetime.fromtimestamp(r.uniform(attack_start_time, attack_start_time + attack_duration))
+        records.append(Record(tgs_req_time, 'KRB_TGS_REQ', compromized_ip, None, f'{sname}/DIPLOMA.RU', 'DIPLOMA.RU',
+                              None))
+    sorted_records = sorted(records, key=lambda record: record.time)
+    with open('datasets/sample.csv', 'w') as dataset_file:
+        csv_writer = writer(dataset_file)
+        csv_writer.writerow([f.name for f in fields(Record)])
+        record_fields = [[value for name, value in asdict(record).items()] for record in sorted_records]
+        csv_writer.writerows(record_fields)
