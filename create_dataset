@@ -53,12 +53,17 @@ if __name__ == '__main__':
     for tz in employees_by_tz.items():
         local_start_time_timestamp = (start_time - timedelta(hours=tz[0])).timestamp()
         for _ in range(tz[1]):
+            # первый AS_REQ делается без preauth
             as_req_time = r.normalvariate(local_start_time_timestamp, 900)
             source = inet_ntoa(pack('>I', randint(0x0a000000, 0x0affffff)))  # 10.0.0.0/8
             cname = ''.join(r.choice(ascii_uppercase + digits) for _ in range(10)) # случайное имя клиента
             records.append(Record(datetime.fromtimestamp(as_req_time), 'KRB_AS_REQ', source, cname, 'krbtgt/DIPLOMA.RU',
                             'DIPLOMA.RU', None))
-            ldap_tgs_req_time = as_req_time + r.uniform(0, 0.1)
+            # нужен второй AS_REQ
+            as_req_time = as_req_time + r.uniform(0, 0.1)
+            records.append(Record(datetime.fromtimestamp(as_req_time), 'KRB_AS_REQ', source, cname, 'krbtgt/DIPLOMA.RU',
+                            'DIPLOMA.RU', None))
+            ldap_tgs_req_time = as_req_time + r.uniform(0, 60)
             records.append(Record(datetime.fromtimestamp(ldap_tgs_req_time), 'KRB_TGS_REQ', source, None,
                                   'ldap/dc.diploma.ru', 'DIPLOMA.RU', None))
             tgs_requests = r.randint(0, 100)

@@ -112,7 +112,7 @@ def load_datasets():
         syslog(LOG_INFO, f'Загружено {len(loaded_records)} записей из {len(datasets)} дампов запросов')
     if mech == LearningMechanism.SVM:
         global svm
-        svm = OneClassSVM()
+        svm = OneClassSVM(nu=1e-4, kernel='rbf', gamma=0.1)
         frequencies_vectors = [(item.number, len(item.source_sname_pairs), item.attack_marks) for item in freqs.values()]
         time_start = perf_counter()
         svm.fit_predict(frequencies_vectors)
