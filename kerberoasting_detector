@@ -1,16 +1,66 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser
-
+from csv import writer
+from dataclasses import asdict, dataclass, fields
+from datetime import datetime
 from scapy.layers.inet import IP
 from scapy.layers.kerberos import KRB_TGS_REQ, EncryptedData, KRB_Ticket, KRB_AP_REQ, PADATA, KRB_KDC_REQ_BODY, \
     KRB_AS_REQ
 from scapy.packet import Packet
 from scapy.sendrecv import sniff
+from schedule import every, run_pending
+from signal import signal, SIGTERM
 from syslog import LOG_WARNING, syslog, LOG_INFO
+from threading import Thread
+from time import sleep
+
+
+@dataclass
+class Record:
+    time: datetime
+    type: str
+    source: str
+    cname: str | None
+    sname: str
+    realm: str
 
 rc4_hmac_signature = 23
+records: list[Record]
+running = True
+
+
+def handle_sigterm(signum, frame):
+    dump_dataset()
+    global running
+    running = False
+    exit(0)
+
+
+def run_schedule():
+    while running:
+        run_pending()
+        sleep(1)
+
+
+def dump_dataset():
+    timestamp = int(datetime.now().timestamp())  # количество секунд с начала эпохи (01.01.1970)
+    global records
+    if len(records) > 0:
+        with open(f'datasets/{timestamp}dataset.csv', 'w') as dataset_file:
+            write = writer(dataset_file)
+            write.writerow([f.name for f in fields(Record)])
+            record_fields = [[value for name, value in asdict(record).items()] for record in records]
+            write.writerows(record_fields)
+        request_number = len(records)
+        records = []
+        syslog(LOG_INFO, f'Сделан дамп запросов в файл {timestamp}dataset.csv '
+                         f'(количество запрсов: {request_number})')
+    else:
+        syslog(LOG_INFO, f'Дамп запросов не сделан, т.к. не было запросов')
+
 
 def process_pack(pack: Packet):
+    time = datetime.now()
     if pack.haslayer(KRB_TGS_REQ):
         req = pack[KRB_TGS_REQ]
     elif pack.haslayer(KRB_AS_REQ):
@@ -22,10 +72,13 @@ def process_pack(pack: Packet):
     cname = krb_kdc_req_body.cname
     cname_str = None if cname is None else '/'.join(['' if part is None else part.val.decode() for part in cname.nameString])
     sname_str = '/'.join(['' if part is None else part.val.decode() for part in krb_kdc_req_body.sname.nameString])
-    syslog(LOG_INFO, f'Получен {req.summary()}. Отправитель: {pack[IP].src} '
+    source = pack[IP].src
+    realm = krb_kdc_req_body.realm.val.decode()
+    syslog(LOG_INFO, f'Получен {req.summary()}. Отправитель: {source} '
                      f'(клиент {cname_str}). '
                      f'Запрашиваемый сервис: {sname_str}. '
                      f'Realm: {krb_kdc_req_body.realm.val.decode()}')
+    records.append(Record(time, req.summary(), source, cname_str, sname_str, realm))
     # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
     krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val \
@@ -43,9 +96,14 @@ def process_pack(pack: Packet):
 
 
 if __name__ == '__main__':
+    signal(SIGTERM, handle_sigterm)
     parser = ArgumentParser(description='Детектор атаки Kerberoasting')
     parser.add_argument('--iface', required=False, help='Отслеживаемый интерфейс')
     args = parser.parse_args()
+    records = []
+    every().day.at('00:00').do(dump_dataset)
+    scheduler = Thread(target=run_schedule)
+    scheduler.start()
     iface = args.iface
     syslog(LOG_INFO, f'Детектор атаки Kerberoasting запущен.')
     syslog(LOG_INFO, f'Запущено прослушивание интерфейса {iface}.')
