@@ -127,7 +127,7 @@ def write_svm_learning_results(marks: list[int], prediction: list[int]):
         # Classification metrics
         print(f'Accuracy score: {accuracy_score(marks, prediction)}')
         print(f'Balanced accuracy score: {balanced_accuracy_score(marks, prediction)}')
-        print(f'Top k accuracy: {top_k_accuracy_score(marks, prediction)}')  # k = 2 (бесполезно)
+        # print(f'Top k accuracy: {top_k_accuracy_score(marks, prediction)}')  # k = 2 (бесполезно)
         print(f'Average precision score: {average_precision_score(marks, prediction)}')
         # print(f'Brier score loss: {brier_score_loss(marks, prediction)}') (не принимает отрицательные значения)
         print(f'F1 score: {f1_score(marks, prediction)}')
