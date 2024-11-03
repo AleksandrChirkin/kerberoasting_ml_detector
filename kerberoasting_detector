@@ -109,8 +109,10 @@ def load_dataset():
     syslog(LOG_INFO, f'Датасет загружен')
     if mech == LearningMechanism.SVM:
         global svm
-        svm = OneClassSVM(nu=1e-4, kernel='rbf', gamma=0.1)
-        frequencies_vectors = [(item.number, len(item.source_sname_pairs)) for item in freqs.values()]
+        svm = OneClassSVM(nu=1e-5, gamma=0.1)
+        frequencies_vectors = [(item.number,
+                                len(item.source_sname_pairs) / len(set([pair[0] for pair in item.source_sname_pairs])))
+                               for item in freqs.values()]
         time_start = perf_counter()
         prediction = svm.fit_predict(frequencies_vectors)
         time_end = perf_counter()
