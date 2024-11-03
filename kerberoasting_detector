@@ -144,7 +144,7 @@ def write_svm_learning_results(marks: list[int], prediction: list[int]):
         svm_metrics.write(f'ROC AUC OVO score: {roc_auc_score(marks, prediction, multi_class="ovo")}\n')
         svm_metrics.write(f'ROC AUC OVR weighted score: {roc_auc_score(marks, prediction, multi_class="ovr", average="weighted")}\n')
         svm_metrics.write(f'ROC AUC OVO weighted score: {roc_auc_score(marks, prediction, multi_class="ovo", average="weighted")}\n')
-        svm_metrics.write(f'D2 log loss score: {d2_log_loss_score(marks, prediction)}\n')
+        # svm_metrics.write(f'D2 log loss score: {d2_log_loss_score(marks, prediction)}\n')  # sklearn 
         # Clustering metrics
         svm_metrics.write(f'Adjusted mutual info score: {adjusted_mutual_info_score(marks, prediction)}\n')
         svm_metrics.write(f'Adjusted rand score: {adjusted_rand_score(marks, prediction)}\n')
