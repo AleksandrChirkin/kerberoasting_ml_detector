@@ -125,50 +125,50 @@ def load_dataset():
 def write_svm_learning_results(marks: list[int], prediction: list[int]):
     with open('svm_metrics.txt', 'w') as svm_metrics:
         # Classification metrics
-        print(f'Accuracy score: {accuracy_score(marks, prediction)}')
-        print(f'Balanced accuracy score: {balanced_accuracy_score(marks, prediction)}')
-        # print(f'Top k accuracy: {top_k_accuracy_score(marks, prediction)}')  # k = 2 (бесполезно)
-        print(f'Average precision score: {average_precision_score(marks, prediction)}')
-        # print(f'Brier score loss: {brier_score_loss(marks, prediction)}') (не принимает отрицательные значения)
-        print(f'F1 score: {f1_score(marks, prediction)}')
-        print(f'F1 micro score: {f1_score(marks, prediction, average="micro")}')
-        print(f'F1 macro score: {f1_score(marks, prediction, average="macro")}')
-        print(f'F1 weighted score: {f1_score(marks, prediction, average="weighted")}')
-        # print(f'F1 samples score: {f1_score(marks, prediction, average="samples")}') # Samplewise metrics are not available outside of multilabel classification.
-        print(f'Negative log loss: {log_loss(marks, prediction)}')
-        print(f'Precision score: {precision_score(marks, prediction)}')
-        print(f'Recall score: {recall_score(marks, prediction)}')
-        print(f'Jaccard score: {jaccard_score(marks, prediction)}')
-        print(f'ROC AUC score: {roc_auc_score(marks, prediction)}')
-        print(f'ROC AUC OVR score: {roc_auc_score(marks, prediction, multi_class="ovr")}')
-        print(f'ROC AUC OVO score: {roc_auc_score(marks, prediction, multi_class="ovo")}')
-        print(f'ROC AUC OVR weighted score: {roc_auc_score(marks, prediction, multi_class="ovr", average="weighted")}')
-        print(f'ROC AUC OVO weighted score: {roc_auc_score(marks, prediction, multi_class="ovo", average="weighted")}')
-        print(f'D2 log loss score: {d2_log_loss_score(marks, prediction)}')
+        svm_metrics.write(f'Accuracy score: {accuracy_score(marks, prediction)}\n')
+        svm_metrics.write(f'Balanced accuracy score: {balanced_accuracy_score(marks, prediction)}\n')
+        # svm_metrics.write(f'Top k accuracy: {top_k_accuracy_score(marks, prediction)}\n')  # k = 2 (бесполезно)
+        svm_metrics.write(f'Average precision score: {average_precision_score(marks, prediction)}\n')
+        # svm_metrics.write(f'Brier score loss: {brier_score_loss(marks, prediction)}\n') (не принимает отрицательные значения)
+        svm_metrics.write(f'F1 score: {f1_score(marks, prediction)}\n')
+        svm_metrics.write(f'F1 micro score: {f1_score(marks, prediction, average="micro")}\n')
+        svm_metrics.write(f'F1 macro score: {f1_score(marks, prediction, average="macro")}\n')
+        svm_metrics.write(f'F1 weighted score: {f1_score(marks, prediction, average="weighted")}\n')
+        # svm_metrics.write(f'F1 samples score: {f1_score(marks, prediction, average="samples")}\n') # Samplewise metrics are not available outside of multilabel classification.
+        svm_metrics.write(f'Negative log loss: {log_loss(marks, prediction)}\n')
+        svm_metrics.write(f'Precision score: {precision_score(marks, prediction)}\n')
+        svm_metrics.write(f'Recall score: {recall_score(marks, prediction)}\n')
+        svm_metrics.write(f'Jaccard score: {jaccard_score(marks, prediction)}\n')
+        svm_metrics.write(f'ROC AUC score: {roc_auc_score(marks, prediction)}\n')
+        svm_metrics.write(f'ROC AUC OVR score: {roc_auc_score(marks, prediction, multi_class="ovr")}\n')
+        svm_metrics.write(f'ROC AUC OVO score: {roc_auc_score(marks, prediction, multi_class="ovo")}\n')
+        svm_metrics.write(f'ROC AUC OVR weighted score: {roc_auc_score(marks, prediction, multi_class="ovr", average="weighted")}\n')
+        svm_metrics.write(f'ROC AUC OVO weighted score: {roc_auc_score(marks, prediction, multi_class="ovo", average="weighted")}\n')
+        svm_metrics.write(f'D2 log loss score: {d2_log_loss_score(marks, prediction)}\n')
         # Clustering metrics
-        print(f'Adjusted mutual info score: {adjusted_mutual_info_score(marks, prediction)}')
-        print(f'Adjusted rand score: {adjusted_rand_score(marks, prediction)}')
-        print(f'Completeness score: {completeness_score(marks, prediction)}')
-        print(f'Fowlkes-Mallows score: {fowlkes_mallows_score(marks, prediction)}')
-        print(f'Homogeneity score: {homogeneity_score(marks, prediction)}')
-        print(f'Mutual info score: {mutual_info_score(marks, prediction)}')
-        print(f'Normalized mutual info score: {normalized_mutual_info_score(marks, prediction)}')
-        print(f'Rand score: {rand_score(marks, prediction)}')
-        print(f'V-measure score: {v_measure_score(marks, prediction)}')
+        svm_metrics.write(f'Adjusted mutual info score: {adjusted_mutual_info_score(marks, prediction)}\n')
+        svm_metrics.write(f'Adjusted rand score: {adjusted_rand_score(marks, prediction)}\n')
+        svm_metrics.write(f'Completeness score: {completeness_score(marks, prediction)}\n')
+        svm_metrics.write(f'Fowlkes-Mallows score: {fowlkes_mallows_score(marks, prediction)}\n')
+        svm_metrics.write(f'Homogeneity score: {homogeneity_score(marks, prediction)}\n')
+        svm_metrics.write(f'Mutual info score: {mutual_info_score(marks, prediction)}\n')
+        svm_metrics.write(f'Normalized mutual info score: {normalized_mutual_info_score(marks, prediction)}\n')
+        svm_metrics.write(f'Rand score: {rand_score(marks, prediction)}\n')
+        svm_metrics.write(f'V-measure score: {v_measure_score(marks, prediction)}\n')
         # Regression metrics
-        print(f'Explained variance: {explained_variance_score(marks, prediction)}')
-        print(f'Max error: {max_error(marks, prediction)}')
-        print(f'Negative mean absolute error: {mean_absolute_error(marks, prediction)}')
-        print(f'Negative mean squared error: {mean_squared_error(marks, prediction)}')
-        print(f'Negative root mean squared error: {root_mean_squared_error(marks, prediction)}')
-        # print(f'Negative mean squared log error: {mean_squared_log_error(marks, prediction)}') -1 с квадратами не 
-        # print(f'Negative root mean squared log error: {root_mean_squared_log_error(marks, prediction)}') -//-
-        print(f'Negative median absolute error: {median_absolute_error(marks, prediction)}')
-        print(f'R2 score: {r2_score(marks, prediction)}')
-        # print(f'Negative mean Poisson deviance: {mean_poisson_deviance(marks, prediction)}') -//-
-        # print(f'Negative mean gamma deviance: {mean_gamma_deviance(marks, prediction)}') -//-
-        print(f'Negative mean absolute percentage error: {mean_absolute_percentage_error(marks, prediction)}')
-        print(f'D2 absolute error score: {d2_absolute_error_score(marks, prediction)}')
+        svm_metrics.write(f'Explained variance: {explained_variance_score(marks, prediction)}\n')
+        svm_metrics.write(f'Max error: {max_error(marks, prediction)}\n')
+        svm_metrics.write(f'Negative mean absolute error: {mean_absolute_error(marks, prediction)}\n')
+        svm_metrics.write(f'Negative mean squared error: {mean_squared_error(marks, prediction)}\n')
+        svm_metrics.write(f'Negative root mean squared error: {root_mean_squared_error(marks, prediction)}\n')
+        # svm_metrics.write(f'Negative mean squared log error: {mean_squared_log_error(marks, prediction)}\n') -1 с квадратами не 
+        # svm_metrics.write(f'Negative root mean squared log error: {root_mean_squared_log_error(marks, prediction)}\n') -//-
+        svm_metrics.write(f'Negative median absolute error: {median_absolute_error(marks, prediction)}\n')
+        svm_metrics.write(f'R2 score: {r2_score(marks, prediction)}\n')
+        # svm_metrics.write(f'Negative mean Poisson deviance: {mean_poisson_deviance(marks, prediction)}\n') -//-
+        # svm_metrics.write(f'Negative mean gamma deviance: {mean_gamma_deviance(marks, prediction)}\n') -//-
+        svm_metrics.write(f'Negative mean absolute percentage error: {mean_absolute_percentage_error(marks, prediction)}\n')
+        svm_metrics.write(f'D2 absolute error score: {d2_absolute_error_score(marks, prediction)}\n')
     syslog(LOG_INFO, 'Метрики обучения SVM записаны в файл svm_metrics.txt')
 
 
