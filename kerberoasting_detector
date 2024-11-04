@@ -107,10 +107,10 @@ def load_dataset():
             freqs[time_without_seconds].attack_marks += record.mark
         else:
             freqs[time_without_seconds] = FrequenciesItem(1, {(record.source, record.sname)}, record.mark)
-        if record.source in user_timestamps.keys():
-            user_timestamps[record.source] = [time_without_seconds]
+        if record.source in timestamps.keys():
+            timestamps[record.source] = [time_without_seconds]
         else:
-            user_timestamps[record.source].append(time_without_seconds)
+            timestamps[record.source].append(time_without_seconds)
     syslog(LOG_INFO, f'Датасет загружен')
     if mech == LearningMechanism.SVM:
         global svm
