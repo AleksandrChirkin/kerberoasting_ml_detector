@@ -238,9 +238,9 @@ def process_pack(pack: Packet):
     else:
         frequencies[time_without_seconds] = FrequenciesItem(1, {(source, sname_str)}, 0)
     if source in user_timestamps.keys():
-        user_timestamps[source] = [time_without_seconds]
-    else:
         user_timestamps[source].append(time_without_seconds)
+    else:
+        user_timestamps[source] = [time_without_seconds]
     # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
     krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val \
