@@ -6,13 +6,13 @@ from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timedelta
 from enum import Enum
 from os.path import join
-from random import Random
 from scapy.layers.inet import IP
 from scapy.layers.kerberos import KRB_TGS_REQ, EncryptedData, KRB_Ticket, KRB_AP_REQ, PADATA, KRB_KDC_REQ_BODY, \
     KRB_AS_REQ
 from scapy.packet import Packet
 from scapy.sendrecv import sniff
 from schedule import every, run_pending
+from scipy.stats import kstest
 from signal import signal, SIGTERM
 from sklearn.metrics import *
 from sklearn.neighbors import LocalOutlierFactor
@@ -48,10 +48,10 @@ class LearningMechanism(Enum):
 
 
 rc4_hmac_signature = 23
-random = Random()
 lof_min = -1.1
 records: list[Record]
 frequencies: OrderedDict[datetime, FrequenciesItem]
+user_timestamps: dict[str, list[datetime]]
 running = True
 mech: LearningMechanism
 svm: OneClassSVM
@@ -106,6 +106,10 @@ def load_dataset():
             freqs[time_without_seconds].attack_marks += record.mark
         else:
             freqs[time_without_seconds] = FrequenciesItem(1, {(record.source, record.sname)}, record.mark)
+        if record.source in user_timestamps.keys():
+            user_timestamps[record.source] = [time_without_seconds]
+        else:
+            user_timestamps[record.source].append(time_without_seconds)
     syslog(LOG_INFO, f'Датасет загружен')
     if mech == LearningMechanism.SVM:
         global svm
@@ -175,15 +179,16 @@ def write_svm_learning_results(marks: list[int], prediction: list[int]):
 def find_anomaly():
     # если в течение последней секунды не зафиксировано никакой активности, то и искать аномалии бессмысленно
     time = datetime.now()
-    if (time.replace(microsecond=0) - timedelta(seconds=1)) not in frequencies.keys():
+    previous_second = time.replace(microsecond=0) - timedelta(seconds=1)
+    if previous_second not in frequencies.keys():
         return
     frequencies_vectors = [(item.number, len(item.source_sname_pairs)) for item in frequencies.values()]
     if mech == LearningMechanism.LOF:
-        lof = LocalOutlierFactor(n_neighbors=20, contamination=0.1)
+        lof = LocalOutlierFactor(n_neighbors=20, contamination=1e-5)
         time_start = perf_counter()
         lof.fit_predict(frequencies_vectors)
-        lof_values = lof.negative_outlier_factor_
         time_stop = perf_counter()
+        lof_values = lof.negative_outlier_factor_
         last_measurement = lof_values[-1]
         if last_measurement < lof_min:
             syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. '
@@ -195,6 +200,14 @@ def find_anomaly():
         if last_measurement < 0:
             syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. '
                                 f'Время анализа: {time_stop - time_start} скекунд')
+    for user in user_timestamps:
+        datetimes = user_timestamps[user]
+        if previous_second not in datetimes:
+            continue
+        timestamps = [dt.timestamp() for dt in datetimes]
+        kstest_result = kstest(timestamps, 'uniform', args=(min(timestamps), max(timestamps)))
+        if kstest_result.pvalue >= 0.05:
+            syslog(LOG_WARNING, f'Обнаружена подозрительная серия регулярных запросов с хоста {user}')
 
 
 def process_pack(pack: Packet):
@@ -223,6 +236,10 @@ def process_pack(pack: Packet):
         frequencies[time_without_seconds].source_sname_pairs.add((source, sname_str))
     else:
         frequencies[time_without_seconds] = FrequenciesItem(1, {(source, sname_str)}, 0)
+    if source in user_timestamps.keys():
+        user_timestamps[source] = [time_without_seconds]
+    else:
+        user_timestamps[source].append(time_without_seconds)
     # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
     krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val \
