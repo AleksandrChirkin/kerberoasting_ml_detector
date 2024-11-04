@@ -2,6 +2,7 @@
 from csv import writer
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timedelta
+from os.path import join
 from random import Random, randint
 from socket import inet_ntoa
 from string import ascii_uppercase, digits
@@ -80,9 +81,9 @@ if __name__ == '__main__':
         sname = spns[r.randint(0, len(spns) - 1)]
         tgs_req_time = datetime.fromtimestamp(r.uniform(attack_start_time, attack_start_time + attack_duration))
         records.append(Record(tgs_req_time, 'KRB_TGS_REQ', compromized_ip, None, f'{sname}/DIPLOMA.RU', 'DIPLOMA.RU',
-                              None))
+                              1))
     sorted_records = sorted(records, key=lambda record: record.time)
-    with open('datasets/sample.csv', 'w') as dataset_file:
+    with open(join('datasets', 'sample.csv'), 'w') as dataset_file:
         csv_writer = writer(dataset_file)
         csv_writer.writerow([f.name for f in fields(Record)])
         record_fields = [[value for name, value in asdict(record).items()] for record in sorted_records]
