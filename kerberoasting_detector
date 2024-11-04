@@ -98,6 +98,7 @@ def load_dataset():
             record.mark = 0 if record.mark == '' else int(record.mark)
             loaded_records.append(record)
     freqs = OrderedDict()
+    timestamps = {}
     for record in loaded_records:
         time_without_seconds = record.time.replace(microsecond=0)
         if time_without_seconds in freqs.keys():
@@ -123,7 +124,7 @@ def load_dataset():
         syslog(LOG_INFO, f'SVM обучена за {time_end - time_start} секунд')
         marks = [1 if item.attack_marks == 0 else -1 for item in freqs.values()]
         write_svm_learning_results(marks, prediction)
-    return freqs
+    return freqs, timestamps
 
 
 def write_svm_learning_results(marks: list[int], prediction: list[int]):
@@ -264,7 +265,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     records = []
     mech = args.mech
-    frequencies = load_dataset()
+    frequencies, user_timestamps = load_dataset()
     every().day.at('00:00').do(dump_dataset)
     every().second.do(find_anomaly)
     scheduler = Thread(target=run_schedule)
