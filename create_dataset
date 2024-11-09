@@ -17,7 +17,8 @@ class Record:
     cname: str | None
     sname: str
     realm: str
-    mark: int | None
+    flood_mark: int | None
+    fixed_time_mark: int | None
 
 
 if __name__ == '__main__':
@@ -59,29 +60,38 @@ if __name__ == '__main__':
             source = inet_ntoa(pack('>I', randint(0x0a000000, 0x0affffff)))  # 10.0.0.0/8
             cname = ''.join(r.choice(ascii_uppercase + digits) for _ in range(10)) # случайное имя клиента
             records.append(Record(datetime.fromtimestamp(as_req_time), 'KRB_AS_REQ', source, cname, 'krbtgt/DIPLOMA.RU',
-                            'DIPLOMA.RU', None))
+                            'DIPLOMA.RU', None, None))
             # нужен второй AS_REQ
             as_req_time = as_req_time + r.uniform(0, 0.1)
             records.append(Record(datetime.fromtimestamp(as_req_time), 'KRB_AS_REQ', source, cname, 'krbtgt/DIPLOMA.RU',
-                            'DIPLOMA.RU', None))
+                            'DIPLOMA.RU', None, None))
             ldap_tgs_req_time = as_req_time + r.uniform(0, 60)
             records.append(Record(datetime.fromtimestamp(ldap_tgs_req_time), 'KRB_TGS_REQ', source, None,
-                                  'ldap/dc.diploma.ru', 'DIPLOMA.RU', None))
+                                  'ldap/dc.diploma.ru', 'DIPLOMA.RU', None, None))
             tgs_requests = r.randint(0, 100)
             for __ in range(tgs_requests):
                 tgs_req_time = r.uniform(ldap_tgs_req_time, ldap_tgs_req_time + 32400) # время логина + 9 часов
                 sname = spns[r.randint(0, len(spns) - 1)]
                 records.append(Record(datetime.fromtimestamp(tgs_req_time), 'KRB_TGS_REQ', source, None,
-                                      f'{sname}/DIPLOMA.RU', 'DIPLOMA.RU', None))
-    attack_start_time = r.uniform(start_time.replace(hour=0).timestamp(),
-                                  (start_time.replace(hour=0) + timedelta(days=1)).timestamp())
-    attack_duration = r.randint(0, 60)
+                                      f'{sname}/DIPLOMA.RU', 'DIPLOMA.RU', None, None))
+    flood_start_time = r.uniform(start_time.replace(hour=0).timestamp(),
+                                 (start_time.replace(hour=0) + timedelta(days=1)).timestamp())
+    flood_duration = r.randint(0, 60)
     compromized_ip = inet_ntoa(pack('>I', randint(0x0a000000, 0x0affffff)))  # 10.0.0.0/8
     for _ in range(r.randint(100, 1000)):
         sname = spns[r.randint(0, len(spns) - 1)]
-        tgs_req_time = datetime.fromtimestamp(r.uniform(attack_start_time, attack_start_time + attack_duration))
+        tgs_req_time = datetime.fromtimestamp(r.uniform(flood_start_time, flood_start_time + flood_duration))
         records.append(Record(tgs_req_time, 'KRB_TGS_REQ', compromized_ip, None, f'{sname}/DIPLOMA.RU', 'DIPLOMA.RU',
-                              1))
+                              1, None))
+    fixed_time_start_tine = r.uniform(start_time.replace(hour=0).timestamp(),
+                                 (start_time.replace(hour=0) + timedelta(days=1)).timestamp())
+    repeat_interval = r.randint(0, 60)
+    compromized_ip = inet_ntoa(pack('>I', randint(0x0a000000, 0x0affffff)))  # 10.0.0.0/8
+    for i in range(r.randint(100, 1000)):
+        sname = spns[r.randint(0, len(spns) - 1)]
+        tgs_req_time = datetime.fromtimestamp(fixed_time_start_tine + i * repeat_interval)
+        records.append(Record(tgs_req_time, 'KRB_TGS_REQ', compromized_ip, None, f'{sname}/DIPLOMA.RU', 'DIPLOMA.RU',
+                              None, 1))
     sorted_records = sorted(records, key=lambda record: record.time)
     with open(join('datasets', 'sample.csv'), 'w') as dataset_file:
         csv_writer = writer(dataset_file)
