@@ -152,7 +152,7 @@ def get_fixed_time_marks(lof: LocalOutlierFactor, date_times: list[datetime]):
         # обычные действия пользователя вернут -1
         # но нужно проверить, что на подвыборке тех значений, для которых LOF = 1, наблюдается равномерное распределение
         filter_prediction = prediction == 1
-        suspected_attack_timestamps = timestamps[filter_prediction].reshape(-1, 1)
+        suspected_attack_timestamps = timestamps[filter_prediction].reshape(1, -1)[0]
         if len(suspected_attack_timestamps) < len(timestamps):
             max_timestamp = max(suspected_attack_timestamps)
             min_timestamp = min(suspected_attack_timestamps)
@@ -248,7 +248,7 @@ def find_anomaly():
         # обычные действия пользователя вернут -1
         # но нужно проверить, что на подвыборке тех значений, для которых LOF = 1, наблюдается равномерное распределение
         filter_prediction = prediction == 1
-        suspected_attack_timestamps = timestamps[filter_prediction].reshape(-1,1 )
+        suspected_attack_timestamps = timestamps[filter_prediction].reshape(1, -1)[0]
         max_timestamp = max(suspected_attack_timestamps)
         min_timestamp = min(suspected_attack_timestamps)
         kstest_result = kstest([timestamp - min_timestamp for timestamp in suspected_attack_timestamps],
