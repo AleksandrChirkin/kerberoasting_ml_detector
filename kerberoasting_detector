@@ -81,13 +81,19 @@ def dump_dataset():
             csv_writer.writerows(record_fields)
         request_number = len(records)
         records = []
+        for_removal = []
         for timestamp in frequencies:
             if timestamp.timestamp() > start_time:
-                frequencies.pop(timestamp)
+                for_removal.append(timestamp)
+        for item in for_removal:
+            frequencies.pop(item)
         for user, timestamps_item in user_timestamps.items():
+            for_removal = []
             for stamp in timestamps_item.keys():
                 if stamp.timestamp() > start_time:
-                    timestamps_item.pop(stamp)
+                    for_removal.append(stamp)
+            for item in for_removal:
+                timestamps_item.pop(item)
         syslog(LOG_INFO, f'Сделан дамп запросов в файл {timestamp}dataset.csv '
                          f'(количество запросов: {request_number})')
     else:
@@ -210,7 +216,7 @@ def write_learning_metrics(flood_marks: list[int], prediction: list[int], file_n
         # metrics_file.write(f'Negative mean gamma deviance: {mean_gamma_deviance(flood_marks, prediction)}\n') -//-
         metrics_file.write(f'Negative mean absolute percentage error: {mean_absolute_percentage_error(flood_marks, prediction)}\n')
         metrics_file.write(f'D2 absolute error score: {d2_absolute_error_score(flood_marks, prediction)}\n')
-    syslog(LOG_INFO, f'Метрики обучения SVM записаны в файл {file_name}')
+    syslog(LOG_INFO, f'Метрики обучения записаны в файл {file_name}')
 
 
 def find_anomaly():
