@@ -76,7 +76,7 @@ if __name__ == '__main__':
                                       f'{sname}/DIPLOMA.RU', 'DIPLOMA.RU', None, None))
     flood_start_time = r.uniform(start_time.replace(hour=0).timestamp(),
                                  (start_time.replace(hour=0) + timedelta(days=1)).timestamp())
-    flood_duration = r.randint(0, 60)
+    flood_duration = r.randint(0, 10)
     compromized_ip = inet_ntoa(pack('>I', randint(0x0a000000, 0x0affffff)))  # 10.0.0.0/8
     for _ in range(r.randint(100, 1000)):
         sname = spns[r.randint(0, len(spns) - 1)]

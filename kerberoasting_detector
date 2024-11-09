@@ -135,9 +135,9 @@ def load_dataset():
         syslog(LOG_INFO, f'SVM обучена за {time_end - time_start} секунд')
         flood_marks = [1 if item.flood_marks == 0 else -1 for item in freqs.values()]
         write_learning_metrics(flood_marks, flood_prediction, 'flood_metrics.txt')
-    lof = LocalOutlierFactor()
+    lof = LocalOutlierFactor(n_neighbors=50)
     fixed_time_prediction = [get_fixed_time_marks(lof, list(timestamps[user].keys())) for user in timestamps]
-    write_learning_metrics([sum(user_timestamps[user].values()) for user in user_timestamps.keys()],
+    write_learning_metrics([1 if sum(timestamps[user].values()) == 0 else -1 for user in timestamps.keys()],
                            fixed_time_prediction,
                            'fixed_time_metrics.txt')
     return freqs, timestamps
@@ -145,7 +145,7 @@ def load_dataset():
 
 def get_fixed_time_marks(lof: LocalOutlierFactor, date_times: list[datetime]):
     attack_marks = 0
-    if len(date_times) >= 20: # если меньше 20, то LOF и тест Колмогорова-Смирнова плохо работают
+    if len(date_times) >= 50: # если меньше 50, то LOF и тест Колмогорова-Смирнова плохо работают
         timestamps = array([date_time.timestamp() for date_time in date_times]).reshape(-1, 1)
         prediction = lof.fit_predict(timestamps)
         # если есть атака регулярными запросами, то сформируется ядро значений, для которых LOF вернет 1
@@ -153,13 +153,14 @@ def get_fixed_time_marks(lof: LocalOutlierFactor, date_times: list[datetime]):
         # но нужно проверить, что на подвыборке тех значений, для которых LOF = 1, наблюдается равномерное распределение
         filter_prediction = prediction == 1
         suspected_attack_timestamps = timestamps[filter_prediction]
-        max_timestamp = max(suspected_attack_timestamps)
-        min_timestamp = min(suspected_attack_timestamps)
-        kstest_result = kstest([timestamp - min_timestamp for timestamp in suspected_attack_timestamps],
-                               'uniform',
-                               args=(0, max_timestamp - min_timestamp))
-        attack_marks = 0 if kstest_result.pvalue < 0.05 else len(suspected_attack_timestamps)
-    return 1 if attack_marks > 0 else -1
+        if len(suspected_attack_timestamps) < len(timestamps):
+            max_timestamp = max(suspected_attack_timestamps)
+            min_timestamp = min(suspected_attack_timestamps)
+            kstest_result = kstest([timestamp - min_timestamp for timestamp in suspected_attack_timestamps],
+                                   'uniform',
+                                   args=(0, max_timestamp - min_timestamp))
+            attack_marks = 0 if kstest_result.pvalue < 0.05 else len(suspected_attack_timestamps)
+    return 1 if attack_marks == 0 else -1
 
 
 def write_learning_metrics(flood_marks: list[int], prediction: list[int], file_name: str):
@@ -239,7 +240,7 @@ def find_anomaly():
     lof_for_timestamps = LocalOutlierFactor()
     for user in user_timestamps:
         date_times = user_timestamps[user].keys()
-        if previous_second not in date_times or len(date_times) < 20: # если меньше 20, то LOF и тест Колмогорова-Смирнова плохо работают
+        if previous_second not in date_times or len(date_times) < 50: # если меньше 50, то LOF и тест Колмогорова-Смирнова плохо работают
             continue
         timestamps = array([date_time.timestamp() for date_time in date_times]).reshape(-1, 1)
         prediction = lof_for_timestamps.fit_predict(timestamps)
