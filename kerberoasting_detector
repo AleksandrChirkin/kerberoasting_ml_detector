@@ -5,16 +5,17 @@ from csv import DictReader, writer
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timedelta
 from enum import Enum
-from os import listdir
-from os.path import isfile
-from random import Random
+from numpy import array
+from os.path import join
 from scapy.layers.inet import IP
 from scapy.layers.kerberos import KRB_TGS_REQ, EncryptedData, KRB_Ticket, KRB_AP_REQ, PADATA, KRB_KDC_REQ_BODY, \
     KRB_AS_REQ
 from scapy.packet import Packet
 from scapy.sendrecv import sniff
 from schedule import every, run_pending
+from scipy.stats import kstest
 from signal import signal, SIGTERM
+from sklearn.metrics import *
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.svm import OneClassSVM
 from syslog import LOG_WARNING, syslog, LOG_INFO
@@ -30,31 +31,30 @@ class Record:
     cname: str | None
     sname: str
     realm: str
-    mark: int | None
+    flood_mark: int | None
+    fixed_time_mark: int | None
 
 @dataclass
 class FrequenciesItem:
     number: int
     source_sname_pairs: set[tuple[str, str]]
-    attack_marks: int
+    flood_marks: int
 
 
 class LearningMechanism(Enum):
     LOF = 1
     SVM = 2
 
-    def __str__(self):
-        return self.name
-
 
 rc4_hmac_signature = 23
-random = Random()
 lof_min = -1.1
 records: list[Record]
 frequencies: OrderedDict[datetime, FrequenciesItem]
+user_timestamps: dict[str, dict[datetime, int]]
 running = True
 mech: LearningMechanism
 svm: OneClassSVM
+start_time = datetime.now().timestamp()
 
 
 def handle_sigterm(signum, frame):
@@ -74,65 +74,164 @@ def dump_dataset():
     timestamp = int(datetime.now().timestamp())  # количество секунд с начала эпохи (01.01.1970)
     global records
     if len(records) > 0:
-        with open(f'datasets/{timestamp}dataset.csv', 'w') as dataset_file:
+        with open(join('datasets', f'{timestamp}dataset.csv'), 'w') as dataset_file:
             csv_writer = writer(dataset_file)
             csv_writer.writerow([f.name for f in fields(Record)])
             record_fields = [[value for name, value in asdict(record).items()] for record in records]
             csv_writer.writerows(record_fields)
         request_number = len(records)
         records = []
+        for_removal = []
+        for timestamp in frequencies:
+            if timestamp.timestamp() > start_time:
+                for_removal.append(timestamp)
+        for item in for_removal:
+            frequencies.pop(item)
+        for user, timestamps_item in user_timestamps.items():
+            for_removal = []
+            for stamp in timestamps_item.keys():
+                if stamp.timestamp() > start_time:
+                    for_removal.append(stamp)
+            for item in for_removal:
+                timestamps_item.pop(item)
         syslog(LOG_INFO, f'Сделан дамп запросов в файл {timestamp}dataset.csv '
                          f'(количество запросов: {request_number})')
     else:
         syslog(LOG_INFO, f'Дамп запросов не сделан, т.к. не было запросов')
 
 
-def load_datasets():
+def load_dataset():
     loaded_records = []
-    datasets = [f'datasets/{file}' for file in listdir('datasets') if isfile(f'datasets/{file}')]
-    for dataset in datasets:
-        with open(dataset) as dataset_file:
-            csv_reader = DictReader(dataset_file)
-            for row in csv_reader:
-                record = Record(**row)
-                # необходимо преобразовать в datetime, т.к. csv_reader прочитает datetime как строку
-                record.time = datetime.strptime(record.time, '%Y-%m-%d %H:%M:%S.%f')
-                record.mark = 0 if record.mark == '' else int(record.mark)
-                loaded_records.append(record)
+    with open(join('datasets', 'sample.csv')) as dataset_file:
+        csv_reader = DictReader(dataset_file)
+        for row in csv_reader:
+            record = Record(**row)
+            # необходимо преобразовать в datetime, т.к. csv_reader прочитает datetime как строку
+            record.time = datetime.strptime(record.time, '%Y-%m-%d %H:%M:%S.%f')
+            record.flood_mark = 0 if record.flood_mark == '' else int(record.flood_mark)
+            record.fixed_time_mark = 0 if record.fixed_time_mark == '' else int(record.fixed_time_mark)
+            loaded_records.append(record)
     freqs = OrderedDict()
+    timestamps = {}
     for record in loaded_records:
         time_without_seconds = record.time.replace(microsecond=0)
         if time_without_seconds in freqs.keys():
             freqs[time_without_seconds].number += 1
             freqs[time_without_seconds].source_sname_pairs.add((record.source, record.sname))
-            freqs[time_without_seconds].attack_marks += record.mark
+            freqs[time_without_seconds].flood_marks += record.flood_mark
         else:
-            freqs[time_without_seconds] = FrequenciesItem(1, {(record.source, record.sname)}, record.mark)
-    if len(datasets) > 0:
-        syslog(LOG_INFO, f'Загружено {len(loaded_records)} записей из {len(datasets)} дампов запросов')
+            freqs[time_without_seconds] = FrequenciesItem(1, {(record.source, record.sname)}, record.flood_mark)
+        if record.source in timestamps.keys():
+            if time_without_seconds in timestamps[record.source].keys():
+                timestamps[record.source][time_without_seconds] += record.fixed_time_mark
+            else:
+                timestamps[record.source][time_without_seconds] = record.fixed_time_mark
+        else:
+            timestamps[record.source] = {time_without_seconds: record.fixed_time_mark}
+    syslog(LOG_INFO, f'Датасет загружен')
     if mech == LearningMechanism.SVM:
         global svm
-        svm = OneClassSVM()
-        frequencies_vectors = [(item.number, len(item.source_sname_pairs), item.attack_marks) for item in freqs.values()]
+        svm = OneClassSVM(nu=1e-5, gamma=0.1)
+        frequencies_vectors = [(item.number,
+                                len(item.source_sname_pairs) / len(set([pair[0] for pair in item.source_sname_pairs])))
+                               for item in freqs.values()]
         time_start = perf_counter()
-        svm.fit_predict(frequencies_vectors)
+        flood_prediction = svm.fit_predict(frequencies_vectors)
         time_end = perf_counter()
-        syslog(LOG_INFO, f'SVM создана за {time_end - time_start} секунд')
-    return freqs
+        syslog(LOG_INFO, f'SVM обучена за {time_end - time_start} секунд')
+        flood_marks = [1 if item.flood_marks == 0 else -1 for item in freqs.values()]
+        write_learning_metrics(flood_marks, flood_prediction, 'flood_metrics.txt')
+    lof = LocalOutlierFactor(n_neighbors=50)
+    fixed_time_prediction = [get_fixed_time_marks(lof, list(timestamps[user].keys())) for user in timestamps]
+    write_learning_metrics([1 if sum(timestamps[user].values()) == 0 else -1 for user in timestamps.keys()],
+                           fixed_time_prediction,
+                           'fixed_time_metrics.txt')
+    return freqs, timestamps
+
+
+def get_fixed_time_marks(lof: LocalOutlierFactor, date_times: list[datetime]):
+    attack_marks = 0
+    if len(date_times) >= 50: # если меньше 50, то LOF и тест Колмогорова-Смирнова плохо работают
+        timestamps = array([date_time.timestamp() for date_time in date_times]).reshape(-1, 1)
+        prediction = lof.fit_predict(timestamps)
+        # если есть атака регулярными запросами, то сформируется ядро значений, для которых LOF вернет 1
+        # обычные действия пользователя вернут -1
+        # но нужно проверить, что на подвыборке тех значений, для которых LOF = 1, наблюдается равномерное распределение
+        filter_prediction = prediction == 1
+        suspected_attack_timestamps = timestamps[filter_prediction].reshape(1, -1)[0]
+        if len(suspected_attack_timestamps) < len(timestamps):
+            max_timestamp = max(suspected_attack_timestamps)
+            min_timestamp = min(suspected_attack_timestamps)
+            kstest_result = kstest([timestamp - min_timestamp for timestamp in suspected_attack_timestamps],
+                                   'uniform',
+                                   args=(0, max_timestamp - min_timestamp))
+            attack_marks = 0 if kstest_result.pvalue < 0.05 else len(suspected_attack_timestamps)
+    return 1 if attack_marks == 0 else -1
+
+
+def write_learning_metrics(flood_marks: list[int], prediction: list[int], file_name: str):
+    with open(file_name, 'w') as metrics_file:
+        # Classification metrics
+        metrics_file.write(f'Accuracy score: {accuracy_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Balanced accuracy score: {balanced_accuracy_score(flood_marks, prediction)}\n')
+        # metrics_file.write(f'Top k accuracy: {top_k_accuracy_score(flood_marks, prediction)}\n')  # k = 2 (бесполезно)
+        metrics_file.write(f'Average precision score: {average_precision_score(flood_marks, prediction)}\n')
+        # metrics_file.write(f'Brier score loss: {brier_score_loss(flood_marks, prediction)}\n') (не принимает отрицательные значения)
+        metrics_file.write(f'F1 score: {f1_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'F1 micro score: {f1_score(flood_marks, prediction, average="micro")}\n')
+        metrics_file.write(f'F1 macro score: {f1_score(flood_marks, prediction, average="macro")}\n')
+        metrics_file.write(f'F1 weighted score: {f1_score(flood_marks, prediction, average="weighted")}\n')
+        # metrics_file.write(f'F1 samples score: {f1_score(flood_marks, prediction, average="samples")}\n') # Samplewise metrics are not available outside of multilabel classification.
+        metrics_file.write(f'Negative log loss: {log_loss(flood_marks, prediction)}\n')
+        metrics_file.write(f'Precision score: {precision_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Recall score: {recall_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Jaccard score: {jaccard_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'ROC AUC score: {roc_auc_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'ROC AUC OVR score: {roc_auc_score(flood_marks, prediction, multi_class="ovr")}\n')
+        metrics_file.write(f'ROC AUC OVO score: {roc_auc_score(flood_marks, prediction, multi_class="ovo")}\n')
+        metrics_file.write(f'ROC AUC OVR weighted score: {roc_auc_score(flood_marks, prediction, multi_class="ovr", average="weighted")}\n')
+        metrics_file.write(f'ROC AUC OVO weighted score: {roc_auc_score(flood_marks, prediction, multi_class="ovo", average="weighted")}\n')
+        # metrics_file.write(f'D2 log loss score: {d2_log_loss_score(flood_marks, prediction)}\n')  # sklearn
+        # Clustering metrics
+        metrics_file.write(f'Adjusted mutual info score: {adjusted_mutual_info_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Adjusted rand score: {adjusted_rand_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Completeness score: {completeness_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Fowlkes-Mallows score: {fowlkes_mallows_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Homogeneity score: {homogeneity_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Mutual info score: {mutual_info_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Normalized mutual info score: {normalized_mutual_info_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Rand score: {rand_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'V-measure score: {v_measure_score(flood_marks, prediction)}\n')
+        # Regression metrics
+        metrics_file.write(f'Explained variance: {explained_variance_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Max error: {max_error(flood_marks, prediction)}\n')
+        metrics_file.write(f'Negative mean absolute error: {mean_absolute_error(flood_marks, prediction)}\n')
+        metrics_file.write(f'Negative mean squared error: {mean_squared_error(flood_marks, prediction)}\n')
+        metrics_file.write(f'Negative root mean squared error: {root_mean_squared_error(flood_marks, prediction)}\n')
+        # metrics_file.write(f'Negative mean squared log error: {mean_squared_log_error(flood_marks, prediction)}\n') -1 с квадратами не
+        # metrics_file.write(f'Negative root mean squared log error: {root_mean_squared_log_error(flood_marks, prediction)}\n') -//-
+        metrics_file.write(f'Negative median absolute error: {median_absolute_error(flood_marks, prediction)}\n')
+        metrics_file.write(f'R2 score: {r2_score(flood_marks, prediction)}\n')
+        # metrics_file.write(f'Negative mean Poisson deviance: {mean_poisson_deviance(flood_marks, prediction)}\n') -//-
+        # metrics_file.write(f'Negative mean gamma deviance: {mean_gamma_deviance(flood_marks, prediction)}\n') -//-
+        metrics_file.write(f'Negative mean absolute percentage error: {mean_absolute_percentage_error(flood_marks, prediction)}\n')
+        metrics_file.write(f'D2 absolute error score: {d2_absolute_error_score(flood_marks, prediction)}\n')
+    syslog(LOG_INFO, f'Метрики обучения записаны в файл {file_name}')
 
 
 def find_anomaly():
     # если в течение последней секунды не зафиксировано никакой активности, то и искать аномалии бессмысленно
     time = datetime.now()
-    if (time.replace(microsecond=0) - timedelta(seconds=1)) not in frequencies.keys():
+    previous_second = time.replace(microsecond=0) - timedelta(seconds=1)
+    if previous_second not in frequencies.keys():
         return
-    frequencies_vectors = [(item.number, len(item.source_sname_pairs), item.attack_marks) for item in frequencies.values()]
+    frequencies_vectors = [(item.number, len(item.source_sname_pairs)) for item in frequencies.values()]
     if mech == LearningMechanism.LOF:
-        lof = LocalOutlierFactor(n_neighbors=20, contamination=0.1)
+        lof_for_flood = LocalOutlierFactor(contamination=1e-5)
         time_start = perf_counter()
-        lof.fit_predict(frequencies_vectors)
-        lof_values = lof.negative_outlier_factor_
+        lof_for_flood.fit_predict(frequencies_vectors)
         time_stop = perf_counter()
+        lof_values = lof_for_flood.negative_outlier_factor_
         last_measurement = lof_values[-1]
         if last_measurement < lof_min:
             syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. '
@@ -143,7 +242,26 @@ def find_anomaly():
         time_stop = perf_counter()
         if last_measurement < 0:
             syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. '
-                                f'Время анализа: {time_stop - time_start} скекунд')
+                                f'Время анализа: {time_stop - time_start} секунд')
+    lof_for_timestamps = LocalOutlierFactor()
+    for user in user_timestamps:
+        date_times = user_timestamps[user].keys()
+        if previous_second not in date_times or len(date_times) < 50: # если меньше 50, то LOF и тест Колмогорова-Смирнова плохо работают
+            continue
+        timestamps = array([date_time.timestamp() for date_time in date_times]).reshape(-1, 1)
+        prediction = lof_for_timestamps.fit_predict(timestamps)
+        # если есть атака регулярными запросами, то сформируется ядро значений, для которых LOF вернет 1
+        # обычные действия пользователя вернут -1
+        # но нужно проверить, что на подвыборке тех значений, для которых LOF = 1, наблюдается равномерное распределение
+        filter_prediction = prediction == 1
+        suspected_attack_timestamps = timestamps[filter_prediction].reshape(1, -1)[0]
+        max_timestamp = max(suspected_attack_timestamps)
+        min_timestamp = min(suspected_attack_timestamps)
+        kstest_result = kstest([timestamp - min_timestamp for timestamp in suspected_attack_timestamps],
+                               'uniform',
+                               args=(0, max_timestamp-min_timestamp))
+        if kstest_result.pvalue >= 0.05:
+            syslog(LOG_WARNING, f'Обнаружена подозрительная серия регулярных запросов с хоста {user}')
 
 
 def process_pack(pack: Packet):
@@ -165,13 +283,17 @@ def process_pack(pack: Packet):
                      f'(клиент {cname_str}). '
                      f'Запрашиваемый сервис: {sname_str}. '
                      f'Realm: {krb_kdc_req_body.realm.val.decode()}')
-    records.append(Record(time, req.summary(), source, cname_str, sname_str, realm, None))
+    records.append(Record(time, req.summary(), source, cname_str, sname_str, realm, None, None))
     time_without_seconds = time.replace(microsecond=0)
     if time_without_seconds in frequencies.keys():
         frequencies[time_without_seconds].number += 1
         frequencies[time_without_seconds].source_sname_pairs.add((source, sname_str))
     else:
         frequencies[time_without_seconds] = FrequenciesItem(1, {(source, sname_str)}, 0)
+    if source not in user_timestamps.keys():
+        user_timestamps[source] = {time_without_seconds: 0}
+    elif time_without_seconds not in user_timestamps[source].keys():
+        user_timestamps[source][time_without_seconds] = 0
     # обнаруживаем шифрование слабым алгоритмом RC4 (etype = 0x17 = 23)
     # находим алгоритм шифрования у TGT
     krb_ticket_etype = req[KRB_Ticket][EncryptedData].etype.val \
@@ -196,7 +318,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     records = []
     mech = args.mech
-    frequencies = load_datasets()
+    frequencies, user_timestamps = load_dataset()
     every().day.at('00:00').do(dump_dataset)
     every().second.do(find_anomaly)
     scheduler = Thread(target=run_schedule)
