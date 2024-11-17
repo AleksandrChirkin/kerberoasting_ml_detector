@@ -4,7 +4,6 @@ from collections import OrderedDict
 from csv import DictReader, writer
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timedelta
-from enum import Enum
 from numpy import array
 from os.path import join
 from scapy.layers.inet import IP
@@ -41,18 +40,12 @@ class FrequenciesItem:
     flood_marks: int
 
 
-class LearningMechanism(Enum):
-    LOF = 1
-    SVM = 2
-
-
 rc4_hmac_signature = 23
 lof_min = -1.1
 records: list[Record]
 frequencies: OrderedDict[datetime, FrequenciesItem]
 user_timestamps: dict[str, dict[datetime, int]]
 running = True
-mech: LearningMechanism
 svm: OneClassSVM
 start_time = datetime.now().timestamp()
 
@@ -129,18 +122,17 @@ def load_dataset():
         else:
             timestamps[record.source] = {time_without_seconds: record.fixed_time_mark}
     syslog(LOG_INFO, f'Датасет загружен')
-    if mech == LearningMechanism.SVM:
-        global svm
-        svm = OneClassSVM(nu=1e-5, gamma=0.1)
-        frequencies_vectors = [(item.number,
-                                len(item.source_sname_pairs) / len(set([pair[0] for pair in item.source_sname_pairs])))
-                               for item in freqs.values()]
-        time_start = perf_counter()
-        flood_prediction = svm.fit_predict(frequencies_vectors)
-        time_end = perf_counter()
-        syslog(LOG_INFO, f'SVM обучена за {time_end - time_start} секунд')
-        flood_marks = [1 if item.flood_marks == 0 else -1 for item in freqs.values()]
-        write_learning_metrics(flood_marks, flood_prediction, 'flood_metrics.txt')
+    global svm
+    svm = OneClassSVM(nu=1e-5, gamma=0.1)
+    frequencies_vectors = [(item.number,
+                            len(item.source_sname_pairs) / len(set([pair[0] for pair in item.source_sname_pairs])))
+                            for item in freqs.values()]
+    time_start = perf_counter()
+    flood_prediction = svm.fit_predict(frequencies_vectors)
+    time_end = perf_counter()
+    syslog(LOG_INFO, f'SVM обучена за {time_end - time_start} секунд')
+    flood_marks = [1 if item.flood_marks == 0 else -1 for item in freqs.values()]
+    write_learning_metrics(flood_marks, flood_prediction, 'flood_metrics.txt')
     lof = LocalOutlierFactor(n_neighbors=50)
     fixed_time_prediction = [get_fixed_time_marks(lof, list(timestamps[user].keys())) for user in timestamps]
     write_learning_metrics([1 if sum(timestamps[user].values()) == 0 else -1 for user in timestamps.keys()],
@@ -226,23 +218,9 @@ def find_anomaly():
     if previous_second not in frequencies.keys():
         return
     frequencies_vectors = [(item.number, len(item.source_sname_pairs)) for item in frequencies.values()]
-    if mech == LearningMechanism.LOF:
-        lof_for_flood = LocalOutlierFactor(contamination=1e-5)
-        time_start = perf_counter()
-        lof_for_flood.fit_predict(frequencies_vectors)
-        time_stop = perf_counter()
-        lof_values = lof_for_flood.negative_outlier_factor_
-        last_measurement = lof_values[-1]
-        if last_measurement < lof_min:
-            syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. '
-                                f'Время анализа: {time_stop - time_start} секунд')
-    elif mech == LearningMechanism.SVM:
-        time_start = perf_counter()
-        last_measurement = svm.decision_function([frequencies_vectors[-1]])
-        time_stop = perf_counter()
-        if last_measurement < 0:
-            syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов. '
-                                f'Время анализа: {time_stop - time_start} секунд')
+    last_measurement = svm.decision_function([frequencies_vectors[-1]])
+    if last_measurement < 0:
+        syslog(LOG_WARNING, f'Обнаружено аномально большое количество пакетов.')
     lof_for_timestamps = LocalOutlierFactor()
     for user in user_timestamps:
         date_times = user_timestamps[user].keys()
@@ -313,8 +291,6 @@ if __name__ == '__main__':
     signal(SIGTERM, handle_sigterm)
     parser = ArgumentParser(description='Детектор атаки Kerberoasting')
     parser.add_argument('--iface', required=False, help='Отслеживаемый интерфейс')
-    parser.add_argument('--mech', type=lambda mech: LearningMechanism[mech], default=LearningMechanism.SVM,
-                        choices=list(LearningMechanism), help='Механизм обнаружения')
     args = parser.parse_args()
     records = []
     mech = args.mech

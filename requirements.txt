@@ -1,3 +1,5 @@
 scapy
 schedule
 scikit-learn
+scipy
+numpy
