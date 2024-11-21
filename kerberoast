@@ -10,7 +10,7 @@ def make_tgs_req(sname: str):
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='Симулятор атаки Kerberoast.')
-    parser.add_argument('--domain', type=str, help='Домен для "взлома"')
+    parser.add_argument('--domain', type=str, required=True, help='Домен для "взлома"')
     parser.add_argument('--number_of_tgs', type=int, default=1000, help='Количество TGS-REQ')
     parser.add_argument('--freq', type=int, help='Фиксированная частота запросов')
     args = parser.parse_args()
