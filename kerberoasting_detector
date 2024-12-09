@@ -151,63 +151,19 @@ def get_fixed_time_marks(lof: LocalOutlierFactor, date_times: list[datetime]):
         # но нужно проверить, что на подвыборке тех значений, для которых LOF = 1, наблюдается равномерное распределение
         filter_prediction = prediction == 1
         suspected_attack_timestamps = timestamps[filter_prediction].reshape(1, -1)[0]
-        if len(suspected_attack_timestamps) < len(timestamps):
-            max_timestamp = max(suspected_attack_timestamps)
-            min_timestamp = min(suspected_attack_timestamps)
-            kstest_result = kstest([timestamp - min_timestamp for timestamp in suspected_attack_timestamps],
-                                   'uniform',
-                                   args=(0, max_timestamp - min_timestamp))
-            attack_marks = 0 if kstest_result.pvalue < 0.05 else len(suspected_attack_timestamps)
+        max_timestamp = max(suspected_attack_timestamps)
+        min_timestamp = min(suspected_attack_timestamps)
+        kstest_result = kstest([timestamp - min_timestamp for timestamp in suspected_attack_timestamps],
+                                'uniform',
+                                args=(0, max_timestamp - min_timestamp))
+        attack_marks = 0 if kstest_result.pvalue < 0.05 else len(suspected_attack_timestamps)
     return 1 if attack_marks == 0 else -1
 
 
-def write_learning_metrics(flood_marks: list[int], prediction: list[int], file_name: str):
+def write_learning_metrics(attack_marks: list[int], prediction: list[int], file_name: str):
     with open(file_name, 'w') as metrics_file:
-        # Classification metrics
-        metrics_file.write(f'Accuracy score: {accuracy_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Balanced accuracy score: {balanced_accuracy_score(flood_marks, prediction)}\n')
-        # metrics_file.write(f'Top k accuracy: {top_k_accuracy_score(flood_marks, prediction)}\n')  # k = 2 (бесполезно)
-        metrics_file.write(f'Average precision score: {average_precision_score(flood_marks, prediction)}\n')
-        # metrics_file.write(f'Brier score loss: {brier_score_loss(flood_marks, prediction)}\n') (не принимает отрицательные значения)
-        metrics_file.write(f'F1 score: {f1_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'F1 micro score: {f1_score(flood_marks, prediction, average="micro")}\n')
-        metrics_file.write(f'F1 macro score: {f1_score(flood_marks, prediction, average="macro")}\n')
-        metrics_file.write(f'F1 weighted score: {f1_score(flood_marks, prediction, average="weighted")}\n')
-        # metrics_file.write(f'F1 samples score: {f1_score(flood_marks, prediction, average="samples")}\n') # Samplewise metrics are not available outside of multilabel classification.
-        metrics_file.write(f'Negative log loss: {log_loss(flood_marks, prediction)}\n')
-        metrics_file.write(f'Precision score: {precision_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Recall score: {recall_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Jaccard score: {jaccard_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'ROC AUC score: {roc_auc_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'ROC AUC OVR score: {roc_auc_score(flood_marks, prediction, multi_class="ovr")}\n')
-        metrics_file.write(f'ROC AUC OVO score: {roc_auc_score(flood_marks, prediction, multi_class="ovo")}\n')
-        metrics_file.write(f'ROC AUC OVR weighted score: {roc_auc_score(flood_marks, prediction, multi_class="ovr", average="weighted")}\n')
-        metrics_file.write(f'ROC AUC OVO weighted score: {roc_auc_score(flood_marks, prediction, multi_class="ovo", average="weighted")}\n')
-        # metrics_file.write(f'D2 log loss score: {d2_log_loss_score(flood_marks, prediction)}\n')  # sklearn
-        # Clustering metrics
-        metrics_file.write(f'Adjusted mutual info score: {adjusted_mutual_info_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Adjusted rand score: {adjusted_rand_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Completeness score: {completeness_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Fowlkes-Mallows score: {fowlkes_mallows_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Homogeneity score: {homogeneity_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Mutual info score: {mutual_info_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Normalized mutual info score: {normalized_mutual_info_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Rand score: {rand_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'V-measure score: {v_measure_score(flood_marks, prediction)}\n')
-        # Regression metrics
-        metrics_file.write(f'Explained variance: {explained_variance_score(flood_marks, prediction)}\n')
-        metrics_file.write(f'Max error: {max_error(flood_marks, prediction)}\n')
-        metrics_file.write(f'Negative mean absolute error: {mean_absolute_error(flood_marks, prediction)}\n')
-        metrics_file.write(f'Negative mean squared error: {mean_squared_error(flood_marks, prediction)}\n')
-        metrics_file.write(f'Negative root mean squared error: {root_mean_squared_error(flood_marks, prediction)}\n')
-        # metrics_file.write(f'Negative mean squared log error: {mean_squared_log_error(flood_marks, prediction)}\n') -1 с квадратами не
-        # metrics_file.write(f'Negative root mean squared log error: {root_mean_squared_log_error(flood_marks, prediction)}\n') -//-
-        metrics_file.write(f'Negative median absolute error: {median_absolute_error(flood_marks, prediction)}\n')
-        metrics_file.write(f'R2 score: {r2_score(flood_marks, prediction)}\n')
-        # metrics_file.write(f'Negative mean Poisson deviance: {mean_poisson_deviance(flood_marks, prediction)}\n') -//-
-        # metrics_file.write(f'Negative mean gamma deviance: {mean_gamma_deviance(flood_marks, prediction)}\n') -//-
-        metrics_file.write(f'Negative mean absolute percentage error: {mean_absolute_percentage_error(flood_marks, prediction)}\n')
-        metrics_file.write(f'D2 absolute error score: {d2_absolute_error_score(flood_marks, prediction)}\n')
+        metrics_file.write(f'Accuracy score: {accuracy_score(attack_marks, prediction)}\n')
+        metrics_file.write(f'Classification report:\n{classification_report(attack_marks, prediction, digits=4, labels=[1, -1])}\n')
     syslog(LOG_INFO, f'Метрики обучения записаны в файл {file_name}')
 
 
@@ -293,7 +249,6 @@ if __name__ == '__main__':
     parser.add_argument('--iface', required=False, help='Отслеживаемый интерфейс')
     args = parser.parse_args()
     records = []
-    mech = args.mech
     frequencies, user_timestamps = load_dataset()
     every().day.at('00:00').do(dump_dataset)
     every().second.do(find_anomaly)
